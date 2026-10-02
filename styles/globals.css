@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 150 30% 6%;
+  --foreground: 0 0% 98%;
+  --card: 150 25% 10%;
+  --card-foreground: 0 0% 98%;
+  --muted: 150 15% 18%;
+  --muted-foreground: 150 10% 70%;
+  --border: 150 15% 22%;
+  --input: 150 15% 22%;
+  --ring: 160 84% 39%;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-pitch-950 text-white antialiased;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 10% 0%, rgba(16, 185, 129, 0.18), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 100% 20%, rgba(5, 150, 105, 0.12), transparent 50%),
+    linear-gradient(180deg, #0a1f14 0%, #0f2919 45%, #0a1f14 100%);
+  background-attachment: fixed;
+}
+
+@layer utilities {
+  .print-sheet {
+    @apply bg-white text-slate-900;
+  }
+}
+
+@media print {
+  body {
+    background: white !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-area {
+    box-shadow: none !important;
+    border: none !important;
+  }
+}
