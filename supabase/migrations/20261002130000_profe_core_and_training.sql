@@ -1,10 +1,12 @@
--- Profe App: tenant core + dominio de entrenamientos (aislado de RRHH)
--- RLS por company_id vía user_profiles
+-- Profe App (sandbox cthzofskbfpcgapdauac)
+-- Aislado de mercado_* y webycitas (leads/sites/appointments).
+-- NO toca public.user_profiles (roles mercado: super_admin/owner).
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE SCHEMA IF NOT EXISTS private;
 
--- ─── Tenant core ───────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS public.companies (
+-- ─── Tenant Profe ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.profe_companies (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   timezone TEXT NOT NULL DEFAULT 'America/Tegucigalpa',
@@ -12,32 +14,38 @@ CREATE TABLE IF NOT EXISTS public.companies (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS public.user_profiles (
+COMMENT ON TABLE public.profe_companies IS
+  'Tenants Profe App. Aislado de mercado/webycitas.';
+
+CREATE TABLE IF NOT EXISTS public.profe_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  company_id UUID REFERENCES public.companies(id) ON DELETE SET NULL,
-  role TEXT NOT NULL DEFAULT 'coach',
+  company_id UUID REFERENCES public.profe_companies(id) ON DELETE SET NULL,
+  role TEXT NOT NULL DEFAULT 'coach'
+    CHECK (role IN ('super_admin', 'company_admin', 'coach')),
   full_name TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_user_profiles_company ON public.user_profiles(company_id);
+CREATE INDEX IF NOT EXISTS idx_profe_profiles_company
+  ON public.profe_profiles(company_id);
 
--- Helper: company_id del usuario autenticado (security definer, schema privado)
-CREATE SCHEMA IF NOT EXISTS private;
+COMMENT ON TABLE public.profe_profiles IS
+  'Perfiles Profe App. Separado de public.user_profiles (mercado/webycitas).';
 
-CREATE OR REPLACE FUNCTION private.current_company_id()
+-- Helpers Profe (no colisionan con helpers de otras apps)
+CREATE OR REPLACE FUNCTION private.profe_current_company_id()
 RETURNS UUID
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT company_id FROM public.user_profiles WHERE id = auth.uid()
+  SELECT company_id FROM public.profe_profiles WHERE id = auth.uid()
 $$;
 
-CREATE OR REPLACE FUNCTION private.is_super_admin()
+CREATE OR REPLACE FUNCTION private.profe_is_super_admin()
 RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
@@ -45,15 +53,22 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM public.user_profiles
-    WHERE id = auth.uid() AND lower(role) = 'super_admin' AND is_active = true
+    SELECT 1 FROM public.profe_profiles
+    WHERE id = auth.uid()
+      AND lower(role) = 'super_admin'
+      AND is_active = true
   )
 $$;
 
--- ─── Dominio entrenamientos ────────────────────────────────────
-CREATE TABLE IF NOT EXISTS public.training_sessions (
+REVOKE ALL ON FUNCTION private.profe_current_company_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION private.profe_is_super_admin() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION private.profe_current_company_id() TO authenticated;
+GRANT EXECUTE ON FUNCTION private.profe_is_super_admin() TO authenticated;
+
+-- ─── Dominio entrenamientos ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.profe_training_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  company_id UUID NOT NULL REFERENCES public.profe_companies(id) ON DELETE CASCADE,
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   coach_name TEXT NOT NULL,
   category TEXT NOT NULL,
@@ -65,17 +80,20 @@ CREATE TABLE IF NOT EXISTS public.training_sessions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_training_sessions_company
-  ON public.training_sessions(company_id);
-CREATE INDEX IF NOT EXISTS idx_training_sessions_category
-  ON public.training_sessions(company_id, category);
-CREATE INDEX IF NOT EXISTS idx_training_sessions_date
-  ON public.training_sessions(company_id, scheduled_date DESC);
+CREATE INDEX IF NOT EXISTS idx_profe_training_sessions_company
+  ON public.profe_training_sessions(company_id);
+CREATE INDEX IF NOT EXISTS idx_profe_training_sessions_category
+  ON public.profe_training_sessions(company_id, category);
+CREATE INDEX IF NOT EXISTS idx_profe_training_sessions_date
+  ON public.profe_training_sessions(company_id, scheduled_date DESC);
 
-CREATE TABLE IF NOT EXISTS public.training_phases (
+COMMENT ON TABLE public.profe_training_sessions IS
+  'Cabecera hoja de entrenamiento Profe. RLS por profe company_id.';
+
+CREATE TABLE IF NOT EXISTS public.profe_training_phases (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id UUID NOT NULL REFERENCES public.training_sessions(id) ON DELETE CASCADE,
-  company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL REFERENCES public.profe_training_sessions(id) ON DELETE CASCADE,
+  company_id UUID NOT NULL REFERENCES public.profe_companies(id) ON DELETE CASCADE,
   phase_name TEXT NOT NULL CHECK (
     phase_name IN ('Orientación', 'Aprendizaje', 'Aplicación', 'Juego')
   ),
@@ -87,136 +105,139 @@ CREATE TABLE IF NOT EXISTS public.training_phases (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_training_phases_session
-  ON public.training_phases(session_id);
+CREATE INDEX IF NOT EXISTS idx_profe_training_phases_session
+  ON public.profe_training_phases(session_id);
 
--- ─── RLS ───────────────────────────────────────────────────────
-ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.training_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.training_phases ENABLE ROW LEVEL SECURITY;
+COMMENT ON TABLE public.profe_training_phases IS
+  'Fases Profe: Orientación, Aprendizaje, Aplicación, Juego.';
 
--- companies
-DROP POLICY IF EXISTS companies_select_own ON public.companies;
-CREATE POLICY companies_select_own ON public.companies
+-- ─── RLS ─────────────────────────────────────────────────────
+ALTER TABLE public.profe_companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profe_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profe_training_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profe_training_phases ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON TABLE public.profe_companies FROM anon, authenticated;
+REVOKE ALL ON TABLE public.profe_profiles FROM anon, authenticated;
+REVOKE ALL ON TABLE public.profe_training_sessions FROM anon, authenticated;
+REVOKE ALL ON TABLE public.profe_training_phases FROM anon, authenticated;
+
+GRANT SELECT ON TABLE public.profe_companies TO authenticated;
+GRANT SELECT, UPDATE ON TABLE public.profe_profiles TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.profe_training_sessions TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.profe_training_phases TO authenticated;
+
+DROP POLICY IF EXISTS profe_companies_select_own ON public.profe_companies;
+CREATE POLICY profe_companies_select_own ON public.profe_companies
   FOR SELECT TO authenticated
-  USING (id = private.current_company_id() OR private.is_super_admin());
+  USING (
+    id = private.profe_current_company_id()
+    OR private.profe_is_super_admin()
+  );
 
--- user_profiles
-DROP POLICY IF EXISTS profiles_select_own_company ON public.user_profiles;
-CREATE POLICY profiles_select_own_company ON public.user_profiles
+DROP POLICY IF EXISTS profe_profiles_select_own ON public.profe_profiles;
+CREATE POLICY profe_profiles_select_own ON public.profe_profiles
   FOR SELECT TO authenticated
   USING (
     id = auth.uid()
-    OR company_id = private.current_company_id()
-    OR private.is_super_admin()
+    OR company_id = private.profe_current_company_id()
+    OR private.profe_is_super_admin()
   );
 
-DROP POLICY IF EXISTS profiles_update_self ON public.user_profiles;
-CREATE POLICY profiles_update_self ON public.user_profiles
+DROP POLICY IF EXISTS profe_profiles_update_self ON public.profe_profiles;
+CREATE POLICY profe_profiles_update_self ON public.profe_profiles
   FOR UPDATE TO authenticated
   USING (id = auth.uid())
   WITH CHECK (id = auth.uid());
 
--- training_sessions
-DROP POLICY IF EXISTS training_sessions_select ON public.training_sessions;
-CREATE POLICY training_sessions_select ON public.training_sessions
+DROP POLICY IF EXISTS profe_sessions_select ON public.profe_training_sessions;
+CREATE POLICY profe_sessions_select ON public.profe_training_sessions
   FOR SELECT TO authenticated
-  USING (company_id = private.current_company_id() OR private.is_super_admin());
+  USING (
+    company_id = private.profe_current_company_id()
+    OR private.profe_is_super_admin()
+  );
 
-DROP POLICY IF EXISTS training_sessions_insert ON public.training_sessions;
-CREATE POLICY training_sessions_insert ON public.training_sessions
+DROP POLICY IF EXISTS profe_sessions_insert ON public.profe_training_sessions;
+CREATE POLICY profe_sessions_insert ON public.profe_training_sessions
   FOR INSERT TO authenticated
-  WITH CHECK (company_id = private.current_company_id());
+  WITH CHECK (company_id = private.profe_current_company_id());
 
-DROP POLICY IF EXISTS training_sessions_update ON public.training_sessions;
-CREATE POLICY training_sessions_update ON public.training_sessions
+DROP POLICY IF EXISTS profe_sessions_update ON public.profe_training_sessions;
+CREATE POLICY profe_sessions_update ON public.profe_training_sessions
   FOR UPDATE TO authenticated
-  USING (company_id = private.current_company_id())
-  WITH CHECK (company_id = private.current_company_id());
+  USING (company_id = private.profe_current_company_id())
+  WITH CHECK (company_id = private.profe_current_company_id());
 
-DROP POLICY IF EXISTS training_sessions_delete ON public.training_sessions;
-CREATE POLICY training_sessions_delete ON public.training_sessions
+DROP POLICY IF EXISTS profe_sessions_delete ON public.profe_training_sessions;
+CREATE POLICY profe_sessions_delete ON public.profe_training_sessions
   FOR DELETE TO authenticated
-  USING (company_id = private.current_company_id());
+  USING (company_id = private.profe_current_company_id());
 
--- training_phases
-DROP POLICY IF EXISTS training_phases_select ON public.training_phases;
-CREATE POLICY training_phases_select ON public.training_phases
+DROP POLICY IF EXISTS profe_phases_select ON public.profe_training_phases;
+CREATE POLICY profe_phases_select ON public.profe_training_phases
   FOR SELECT TO authenticated
-  USING (company_id = private.current_company_id() OR private.is_super_admin());
+  USING (
+    company_id = private.profe_current_company_id()
+    OR private.profe_is_super_admin()
+  );
 
-DROP POLICY IF EXISTS training_phases_insert ON public.training_phases;
-CREATE POLICY training_phases_insert ON public.training_phases
+DROP POLICY IF EXISTS profe_phases_insert ON public.profe_training_phases;
+CREATE POLICY profe_phases_insert ON public.profe_training_phases
   FOR INSERT TO authenticated
-  WITH CHECK (company_id = private.current_company_id());
+  WITH CHECK (company_id = private.profe_current_company_id());
 
-DROP POLICY IF EXISTS training_phases_update ON public.training_phases;
-CREATE POLICY training_phases_update ON public.training_phases
+DROP POLICY IF EXISTS profe_phases_update ON public.profe_training_phases;
+CREATE POLICY profe_phases_update ON public.profe_training_phases
   FOR UPDATE TO authenticated
-  USING (company_id = private.current_company_id())
-  WITH CHECK (company_id = private.current_company_id());
+  USING (company_id = private.profe_current_company_id())
+  WITH CHECK (company_id = private.profe_current_company_id());
 
-DROP POLICY IF EXISTS training_phases_delete ON public.training_phases;
-CREATE POLICY training_phases_delete ON public.training_phases
+DROP POLICY IF EXISTS profe_phases_delete ON public.profe_training_phases;
+CREATE POLICY profe_phases_delete ON public.profe_training_phases
   FOR DELETE TO authenticated
-  USING (company_id = private.current_company_id());
+  USING (company_id = private.profe_current_company_id());
 
--- ─── Storage: diagramas de ejercicio ───────────────────────────
+-- ─── Storage: solo bucket profe ──────────────────────────────
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
-  'training-diagrams',
-  'training-diagrams',
+  'profe-training-diagrams',
+  'profe-training-diagrams',
   true,
   5242880,
   ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/heic']
 )
 ON CONFLICT (id) DO NOTHING;
 
--- Path: {company_id}/{session_or_temp}/{filename}
-DROP POLICY IF EXISTS training_diagrams_select ON storage.objects;
-CREATE POLICY training_diagrams_select ON storage.objects
-  FOR SELECT TO authenticated
-  USING (
-    bucket_id = 'training-diagrams'
-    AND (
-      private.is_super_admin()
-      OR (storage.foldername(name))[1] = private.current_company_id()::text
-    )
-  );
-
-DROP POLICY IF EXISTS training_diagrams_public_read ON storage.objects;
-CREATE POLICY training_diagrams_public_read ON storage.objects
+DROP POLICY IF EXISTS profe_diagrams_public_read ON storage.objects;
+CREATE POLICY profe_diagrams_public_read ON storage.objects
   FOR SELECT TO anon, authenticated
-  USING (bucket_id = 'training-diagrams');
+  USING (bucket_id = 'profe-training-diagrams');
 
-DROP POLICY IF EXISTS training_diagrams_insert ON storage.objects;
-CREATE POLICY training_diagrams_insert ON storage.objects
+DROP POLICY IF EXISTS profe_diagrams_insert ON storage.objects;
+CREATE POLICY profe_diagrams_insert ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
-    bucket_id = 'training-diagrams'
-    AND (storage.foldername(name))[1] = private.current_company_id()::text
+    bucket_id = 'profe-training-diagrams'
+    AND (storage.foldername(name))[1] = private.profe_current_company_id()::text
   );
 
-DROP POLICY IF EXISTS training_diagrams_update ON storage.objects;
-CREATE POLICY training_diagrams_update ON storage.objects
+DROP POLICY IF EXISTS profe_diagrams_update ON storage.objects;
+CREATE POLICY profe_diagrams_update ON storage.objects
   FOR UPDATE TO authenticated
   USING (
-    bucket_id = 'training-diagrams'
-    AND (storage.foldername(name))[1] = private.current_company_id()::text
+    bucket_id = 'profe-training-diagrams'
+    AND (storage.foldername(name))[1] = private.profe_current_company_id()::text
   )
   WITH CHECK (
-    bucket_id = 'training-diagrams'
-    AND (storage.foldername(name))[1] = private.current_company_id()::text
+    bucket_id = 'profe-training-diagrams'
+    AND (storage.foldername(name))[1] = private.profe_current_company_id()::text
   );
 
-DROP POLICY IF EXISTS training_diagrams_delete ON storage.objects;
-CREATE POLICY training_diagrams_delete ON storage.objects
+DROP POLICY IF EXISTS profe_diagrams_delete ON storage.objects;
+CREATE POLICY profe_diagrams_delete ON storage.objects
   FOR DELETE TO authenticated
   USING (
-    bucket_id = 'training-diagrams'
-    AND (storage.foldername(name))[1] = private.current_company_id()::text
+    bucket_id = 'profe-training-diagrams'
+    AND (storage.foldername(name))[1] = private.profe_current_company_id()::text
   );
-
-COMMENT ON TABLE public.training_sessions IS 'Cabecera de hoja de entrenamiento (SaaS por company_id)';
-COMMENT ON TABLE public.training_phases IS 'Fases: Orientación, Aprendizaje, Aplicación, Juego';

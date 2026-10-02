@@ -14,13 +14,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (req.method === 'GET') {
       const { data: session, error } = await supabase
-        .from('training_sessions')
+        .from('profe_training_sessions')
         .select(
           `
           id, coach_name, category, scheduled_date,
           general_objective, physical_objective, devotional_theme,
           created_at, updated_at,
-          training_phases (
+          profe_training_phases (
             id, phase_name, explanation, variants_materials,
             diagram_image_url, sort_order
           )
@@ -38,19 +38,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: 'Sesión no encontrada' })
       }
 
-      const phases = Array.isArray(session.training_phases)
-        ? [...session.training_phases].sort(
+      const phases = Array.isArray(session.profe_training_phases)
+        ? [...session.profe_training_phases].sort(
             (a: { sort_order: number }, b: { sort_order: number }) =>
               a.sort_order - b.sort_order
           )
         : []
 
-      return res.status(200).json({ session: { ...session, phases } })
+      const { profe_training_phases: _phases, ...sessionRow } = session
+      return res.status(200).json({ session: { ...sessionRow, phases } })
     }
 
     if (req.method === 'DELETE') {
       const { error } = await supabase
-        .from('training_sessions')
+        .from('profe_training_sessions')
         .delete()
         .eq('id', id)
         .eq('company_id', companyId)

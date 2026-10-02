@@ -18,7 +18,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         typeof req.query.category === 'string' ? req.query.category.trim() : ''
 
       let query = supabase
-        .from('training_sessions')
+        .from('profe_training_sessions')
         .select(
           'id, coach_name, category, scheduled_date, general_objective, physical_objective, devotional_theme, created_at'
         )
@@ -51,7 +51,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const scheduledDate = input.scheduled_date || getTodayInHonduras()
 
       const { data: session, error: sessionError } = await supabase
-        .from('training_sessions')
+        .from('profe_training_sessions')
         .insert({
           company_id: companyId,
           created_by: user.id,
@@ -83,14 +83,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         sort_order: phase.sort_order ?? index,
       }))
 
-      const { error: phasesError } = await supabase.from('training_phases').insert(phases)
+      const { error: phasesError } = await supabase
+        .from('profe_training_phases')
+        .insert(phases)
 
       if (phasesError) {
         logger.error('Create phases failed', {
           error: phasesError.message,
           sessionId: session.id,
         })
-        await supabase.from('training_sessions').delete().eq('id', session.id)
+        await supabase.from('profe_training_sessions').delete().eq('id', session.id)
         return res.status(500).json({ error: 'No se pudieron guardar las fases' })
       }
 

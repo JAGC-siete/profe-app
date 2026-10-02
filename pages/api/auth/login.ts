@@ -35,7 +35,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const admin = createAdminClient()
     const { data: profile } = await admin
-      .from('user_profiles')
+      .from('profe_profiles')
       .select('id, company_id, role, full_name, is_active')
       .eq('id', authData.user.id)
       .maybeSingle()

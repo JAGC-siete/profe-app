@@ -71,7 +71,7 @@ export async function authenticateUser(
 
     const adminSupabase = createAdminClient()
     const { data: userProfile, error: profileError } = await adminSupabase
-      .from('user_profiles')
+      .from('profe_profiles')
       .select('id, company_id, role, is_active, full_name')
       .eq('id', user.id)
       .maybeSingle()
@@ -142,7 +142,7 @@ export async function authenticateUser(
     let companyTimezone: string | null = null
     if (userProfile.company_id) {
       const { data: co } = await adminSupabase
-        .from('companies')
+        .from('profe_companies')
         .select('timezone')
         .eq('id', userProfile.company_id)
         .maybeSingle()

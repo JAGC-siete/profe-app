@@ -31,7 +31,9 @@ npx supabase db push
 # o ejecutar supabase/migrations/20261002130000_profe_core_and_training.sql
 ```
 
-Crear un tenant de prueba: fila en `companies`, usuario en Auth, fila en `user_profiles` con ese `company_id` y `role = 'coach'`.
+Crear un tenant de prueba: fila en `profe_companies`, usuario en Auth, fila en `profe_profiles` con ese `company_id` y `role = 'coach'`.
+
+**Aislamiento sandbox:** tablas `profe_*` + bucket `profe-training-diagrams`. No usa `user_profiles`, `mercado_*`, ni `leads`/`sites`/citas.
 
 ## Rutas
 

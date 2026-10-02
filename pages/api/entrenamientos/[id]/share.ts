@@ -34,12 +34,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const { data: session, error } = await supabase
-      .from('training_sessions')
+      .from('profe_training_sessions')
       .select(
         `
         id, coach_name, category, scheduled_date,
         general_objective, physical_objective, devotional_theme,
-        training_phases (phase_name, explanation, variants_materials, sort_order)
+        profe_training_phases (phase_name, explanation, variants_materials, sort_order)
       `
       )
       .eq('id', id)
@@ -50,8 +50,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: 'Sesión no encontrada' })
     }
 
-    const phases = Array.isArray(session.training_phases)
-      ? [...session.training_phases].sort(
+    const phases = Array.isArray(session.profe_training_phases)
+      ? [...session.profe_training_phases].sort(
           (a: { sort_order: number }, b: { sort_order: number }) =>
             a.sort_order - b.sort_order
         )

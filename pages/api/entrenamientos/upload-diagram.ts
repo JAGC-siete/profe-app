@@ -46,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const path = `${companyId}/drafts/${Date.now()}-${safeName}`
 
     const { error: uploadError } = await supabase.storage
-      .from('training-diagrams')
+      .from('profe-training-diagrams')
       .upload(path, buffer, { contentType, upsert: false })
 
     if (uploadError) {
@@ -55,7 +55,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const { data: publicData } = supabase.storage
-      .from('training-diagrams')
+      .from('profe-training-diagrams')
       .getPublicUrl(path)
 
     return res.status(200).json({ url: publicData.publicUrl, path })
