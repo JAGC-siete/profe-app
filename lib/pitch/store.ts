@@ -7,7 +7,8 @@ import {
   positionsFromElements,
 } from './animation'
 import { cloneScene, EMPTY_DIAGRAM_SCENE } from './defaults'
-import { newElementId } from './coords'
+import { newElementId, pitchDimensions } from './coords'
+import { nextSpawnPosition } from './spawn'
 import { strokeHitsPoint } from './overlayGeometry'
 import type {
   DiagramScene,
@@ -64,7 +65,7 @@ function ensureFrames(elements: PitchElement[], frames: PitchKeyframe[]): PitchK
 }
 
 export const usePitchStore = create<PitchStore>((set, get) => ({
-  pitchType: 'full_field',
+  pitchType: 'half_field',
   elements: [],
   frames: [{ id: 'f0', positions: {} }],
   frameIndex: 0,
@@ -136,6 +137,7 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
   addElement: (type, team = 'home') => {
     const { elements, frames } = get()
     if (elements.length >= MAX_PITCH_ELEMENTS) return
+    const position = nextSpawnPosition(elements.length)
     const el: PitchElement = {
       id: newElementId(type === 'player' ? 'p' : type[0]),
       type,
@@ -145,14 +147,14 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
           ? elements.filter((e) => e.type === 'player').length + 1
           : undefined,
       color: type === 'cone' ? '#f97316' : undefined,
-      position: { x: 50, z: 50, rotation: 0 },
+      position,
     }
     const nextElements = [...elements, el]
     const nextFrames = ensureFrames(nextElements, frames).map((f) => ({
       ...f,
       positions: {
         ...f.positions,
-        [el.id]: { x: 50, z: 50, rotation: 0 },
+        [el.id]: { ...position },
       },
     }))
     set({
@@ -236,7 +238,7 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
     const animation = buildKeyframeAnimation(ensured, durationPerFrame)
     const scene: DiagramScene = {
       ...EMPTY_DIAGRAM_SCENE,
-      pitch: { type: pitchType, dimensions: [105, 68] },
+      pitch: { type: pitchType, dimensions: pitchDimensions(pitchType) },
       elements: synced,
       animation,
       strokes: strokes.length > 0 ? strokes : undefined,

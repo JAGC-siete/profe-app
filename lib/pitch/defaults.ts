@@ -2,7 +2,8 @@ import type { DiagramScene } from './types'
 
 export const EMPTY_DIAGRAM_SCENE: DiagramScene = {
   version: 1,
-  pitch: { type: 'full_field', dimensions: [105, 68] },
+  // Media cancha: mejor escala visual para drills U7–juveniles
+  pitch: { type: 'half_field', dimensions: [52.5, 68] },
   elements: [],
   strokes: [],
 }

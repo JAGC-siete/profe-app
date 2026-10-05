@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
 import {
   applyPositionsToElements,
+  pitchDimensions,
   sampleNormalizedAnimation,
   STROKE_PALETTE,
   type DiagramScene,
@@ -73,6 +74,19 @@ export function PitchEditorV2({
     initFromScene(initialScene)
   }, [initialScene, initFromScene])
 
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [busy, onCancel])
+
   const onReady = useCallback((api: GlApi) => {
     glApi.current = api
   }, [])
@@ -83,7 +97,7 @@ export function PitchEditorV2({
     const positions = previewPositions ?? framePositions ?? {}
     return {
       version: 1,
-      pitch: { type: pitchType, dimensions: [105, 68] },
+      pitch: { type: pitchType, dimensions: pitchDimensions(pitchType) },
       elements: applyPositionsToElements(elements, positions),
     }
   }, [pitchType, elements, previewPositions, framePositions])
@@ -182,14 +196,20 @@ export function PitchEditorV2({
   const drawingMode = drawTool !== 'none'
 
   return (
-    <div className="fixed inset-0 z-[80] flex flex-col bg-[#07140c] text-white">
+    <div
+      className="fixed inset-0 z-[80] flex flex-col bg-[#07140c] text-white"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Editor de cancha — Diagrama táctico"
+    >
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
         <div>
           <p className="text-xs uppercase tracking-widest text-brand-300">
-            Editor de cancha V2
+            Editor de cancha
           </p>
-          <p className="font-display text-lg font-semibold">
-            Drag + keyframes + flechas
+          <p className="font-display text-lg font-semibold">Diagrama táctico</p>
+          <p className="text-xs text-white/45">
+            Arrastra tokens · frames · flechas · Escape para salir
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -407,6 +427,13 @@ export function PitchEditorV2({
           onAddStroke={addStroke}
           onEraseAt={eraseAt}
         />
+        {elements.length === 0 && !drawingMode ? (
+          <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center px-4">
+            <p className="rounded-lg border border-white/15 bg-black/55 px-4 py-2 text-center text-sm text-white/80 backdrop-blur">
+              Añade jugadores o material · arrastra en la cancha · usa Flecha para trazos
+            </p>
+          </div>
+        ) : null}
       </div>
     </div>
   )

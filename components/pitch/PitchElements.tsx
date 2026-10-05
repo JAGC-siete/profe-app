@@ -1,9 +1,13 @@
 'use client'
 
 import { useMemo } from 'react'
+import { Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import type { DiagramScene, PitchElement, PitchTeam } from '../../lib/pitch'
 import { normToWorld } from '../../lib/pitch'
+
+/** Escala visual: tokens ~reales se ven como puntos en cancha completa. */
+const TOKEN_SCALE = 3.2
 
 const TEAM_COLOR: Record<PitchTeam, string> = {
   home: '#2563eb',
@@ -52,28 +56,35 @@ function ElementMesh({
     <group
       position={[x, 0, z]}
       rotation={[0, rotY, 0]}
+      scale={TOKEN_SCALE}
       onClick={handleClick}
       onPointerDown={handlePointerDown}
       userData={{ id: el.id }}
     >
+      {/* Hit target más grande para touch / click (opacity 0, sigue raycast) */}
+      <mesh position={[0, 0.4, 0]}>
+        <sphereGeometry args={[1.1, 12, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+
       {el.type === 'cone' ? (
         <mesh position={[0, 0.35, 0]}>
           <coneGeometry args={[0.45, 0.7, 10]} />
           <meshStandardMaterial
             color={color}
             emissive={selected ? '#fff' : '#000'}
-            emissiveIntensity={selected ? 0.25 : 0}
+            emissiveIntensity={selected ? 0.35 : 0}
           />
         </mesh>
       ) : null}
 
       {el.type === 'ball' ? (
-        <mesh position={[0, 0.22, 0]}>
-          <sphereGeometry args={[0.22, 16, 16]} />
+        <mesh position={[0, 0.35, 0]}>
+          <sphereGeometry args={[0.32, 16, 16]} />
           <meshStandardMaterial
             color={color}
             emissive={selected ? '#fff' : '#000'}
-            emissiveIntensity={selected ? 0.2 : 0}
+            emissiveIntensity={selected ? 0.25 : 0}
           />
         </mesh>
       ) : null}
@@ -105,20 +116,37 @@ function ElementMesh({
       {el.type === 'player' ? (
         <>
           <mesh position={[0, 0.55, 0]}>
-            <capsuleGeometry args={[0.35, 0.55, 6, 12]} />
+            <capsuleGeometry args={[0.4, 0.6, 6, 12]} />
             <meshStandardMaterial
               color={color}
               emissive={selected ? '#fff' : '#000'}
-              emissiveIntensity={selected ? 0.2 : 0}
+              emissiveIntensity={selected ? 0.3 : 0}
             />
           </mesh>
           {el.number != null ? (
-            <mesh position={[0, 1.35, 0]}>
-              <sphereGeometry args={[0.12, 8, 8]} />
-              <meshBasicMaterial color="#fff" />
-            </mesh>
+            <Html
+              position={[0, 1.55, 0]}
+              center
+              distanceFactor={28}
+              style={{ pointerEvents: 'none' }}
+            >
+              <span
+                className={`flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-bold shadow ${
+                  selected ? 'bg-white text-[#07140c]' : 'bg-black/70 text-white'
+                }`}
+              >
+                {el.number}
+              </span>
+            </Html>
           ) : null}
         </>
+      ) : null}
+
+      {selected ? (
+        <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.85, 1.05, 28]} />
+          <meshBasicMaterial color="#6ee7b7" transparent opacity={0.9} />
+        </mesh>
       ) : null}
     </group>
   )

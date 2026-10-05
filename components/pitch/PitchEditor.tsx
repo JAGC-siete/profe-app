@@ -1,12 +1,13 @@
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TransformControls } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
 import type { Object3D } from 'three'
 import {
   cloneScene,
   newElementId,
+  nextSpawnPosition,
   worldToNorm,
   type DiagramScene,
   type PitchElement,
@@ -72,6 +73,19 @@ export function PitchEditor({
     glApi.current = api
   }, [])
 
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [busy, onCancel])
+
   const addElement = (type: PitchElementType, team: PitchTeam = 'home') => {
     const el: PitchElement = {
       id: newElementId(type === 'player' ? 'p' : type[0]),
@@ -79,7 +93,7 @@ export function PitchEditor({
       team: type === 'player' ? team : 'neutral',
       number: type === 'player' ? scene.elements.filter((e) => e.type === 'player').length + 1 : undefined,
       color: type === 'cone' ? '#f97316' : undefined,
-      position: { x: 50, z: 50, rotation: 0 },
+      position: nextSpawnPosition(scene.elements.length),
     }
     setScene((s) => ({ ...s, elements: [...s.elements, el] }))
     setSelectedId(el.id)
@@ -188,11 +202,16 @@ export function PitchEditor({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex flex-col bg-[#07140c] text-white">
+    <div
+      className="fixed inset-0 z-[80] flex flex-col bg-[#07140c] text-white"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Editor de cancha — Diagrama táctico"
+    >
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-3">
         <div>
           <p className="text-xs uppercase tracking-widest text-brand-300">Editor de cancha</p>
-          <p className="font-display text-lg font-semibold">Diagrama táctico 3D</p>
+          <p className="font-display text-lg font-semibold">Diagrama táctico</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={busy}>
@@ -250,7 +269,7 @@ export function PitchEditor({
         <p className="bg-red-500/20 px-4 py-2 text-sm text-red-100">{error}</p>
       ) : null}
 
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 touch-none">
         <PitchCanvasShell className="h-full w-full" onCreated={onReady}>
           <PitchSceneInner
             scene={scene}
@@ -266,6 +285,13 @@ export function PitchEditor({
             <ExportBridge onReady={onReady} />
           </PitchSceneInner>
         </PitchCanvasShell>
+        {scene.elements.length === 0 ? (
+          <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center px-4">
+            <p className="rounded-lg border border-white/15 bg-black/55 px-4 py-2 text-sm text-white/80 backdrop-blur">
+              Añade jugadores, conos o balón · toca para seleccionar · arrastra el gizmo
+            </p>
+          </div>
+        ) : null}
       </div>
     </div>
   )

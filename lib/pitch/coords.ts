@@ -14,6 +14,12 @@ export function pitchAspect(type: PitchType): { width: number; length: number } 
   }
 }
 
+/** Dimensiones metadata [largo, ancho] en metros (schema). */
+export function pitchDimensions(type: PitchType): [number, number] {
+  const { width, length } = pitchAspect(type)
+  return [length, width]
+}
+
 /** Normalizado 0–100 → mundo Three (centrado en origen, Y=0). */
 export function normToWorld(
   x: number,
