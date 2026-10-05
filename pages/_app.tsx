@@ -4,6 +4,7 @@ import { useRouter } from 'next/router'
 import { DM_Sans, Syne } from 'next/font/google'
 import { AuthProvider } from '../lib/auth'
 import AppShell from '../components/AppShell'
+import AdminShell from '../components/AdminShell'
 import { cn } from '../lib/utils'
 import '../styles/globals.css'
 
@@ -25,14 +26,21 @@ export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter()
   const isLogin = router.pathname === '/app/login'
   const isCampo = router.pathname === '/app/entrenamientos/[id]/campo'
+  const isAdminRoute = router.pathname.startsWith('/app/admin')
   const isAppRoute =
-    router.pathname.startsWith('/app') && !isLogin
+    router.pathname.startsWith('/app') && !isLogin && !isAdminRoute && !isCampo
 
   return (
     <div className={cn(dmSans.variable, syne.variable, 'font-sans')}>
       {isCampo ? (
         <AuthProvider>
           <Component {...pageProps} />
+        </AuthProvider>
+      ) : isAdminRoute ? (
+        <AuthProvider>
+          <AdminShell>
+            <Component {...pageProps} />
+          </AdminShell>
         </AuthProvider>
       ) : isAppRoute ? (
         <AuthProvider>

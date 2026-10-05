@@ -137,17 +137,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (req.method === 'DELETE') {
+      // Soft archive — no hard delete desde la app
       const { error } = await supabase
         .from('profe_training_sessions')
-        .delete()
+        .update({
+          is_archived: true,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', id)
         .eq('company_id', companyId)
 
       if (error) {
-        logger.error('Delete session failed', { error: error.message, id })
-        return res.status(500).json({ error: 'No se pudo eliminar' })
+        logger.error('Archive session failed', { error: error.message, id })
+        return res.status(500).json({ error: 'No se pudo archivar' })
       }
-      return res.status(200).json({ success: true })
+      return res.status(200).json({ success: true, archived: true })
     }
 
     return res.status(405).json({ error: 'Method not allowed' })

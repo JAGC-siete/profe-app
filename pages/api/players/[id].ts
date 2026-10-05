@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { requireCompanyAccess } from '../../../lib/auth/api-auth-fixed'
+import { requireAdmin, requireCompanyAccess } from '../../../lib/auth/api-auth-fixed'
+import { isAdminRole } from '../../../lib/auth/roles'
 import { playerUpdateSchema } from '../../../lib/validations/training-session'
 import { logger } from '../../../lib/logger'
 
@@ -8,14 +9,13 @@ const PLAYER_SELECT =
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
-    const auth = await requireCompanyAccess(req, res)
-    const { supabase, companyId } = auth
-    if (!companyId) return res.status(400).json({ error: 'Company required' })
-
     const id = typeof req.query.id === 'string' ? req.query.id : ''
     if (!id) return res.status(400).json({ error: 'ID requerido' })
 
     if (req.method === 'PATCH') {
+      const auth = await requireCompanyAccess(req, res)
+      const { supabase, companyId } = auth
+      if (!companyId) return res.status(400).json({ error: 'Company required' })
       const parsed = playerUpdateSchema.safeParse(req.body)
       if (!parsed.success) {
         return res.status(400).json({
@@ -43,7 +43,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         patch.guardian_phone = input.guardian_phone.trim()
       }
       if (input.notes !== undefined) patch.notes = input.notes.trim()
-      if (input.is_active !== undefined) patch.is_active = Boolean(input.is_active)
+      if (input.is_active !== undefined) {
+        if (input.is_active === false && !isAdminRole(auth.role)) {
+          return res.status(403).json({ error: 'Solo admin puede dar de baja' })
+        }
+        patch.is_active = Boolean(input.is_active)
+      }
 
       const { data, error } = await supabase
         .from('profe_players')
@@ -62,7 +67,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (req.method === 'DELETE') {
-      // Soft delete
+      const auth = await requireAdmin(req, res)
+      const { supabase, companyId } = auth
+      if (!companyId) return res.status(400).json({ error: 'Company required' })
+
+      // Soft delete — solo admin academia
       const { data, error } = await supabase
         .from('profe_players')
         .update({ is_active: false, updated_at: new Date().toISOString() })
@@ -83,9 +92,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (error) {
     if (
       error instanceof Error &&
-      ['UNAUTHORIZED', 'PROFILE_REQUIRED', 'COMPANY_ACCESS_REQUIRED'].includes(
-        error.message
-      )
+      [
+        'UNAUTHORIZED',
+        'PROFILE_REQUIRED',
+        'COMPANY_ACCESS_REQUIRED',
+        'ADMIN_REQUIRED',
+        'ACCOUNT_DEACTIVATED',
+      ].includes(error.message)
     ) {
       return
     }

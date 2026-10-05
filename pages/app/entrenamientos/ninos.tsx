@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import Head from 'next/head'
+import Link from 'next/link'
 import { Button } from '../../../components/ui/button'
 import { Input } from '../../../components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
 import { cn } from '../../../lib/utils'
-import { Pencil, Phone, UserMinus, UserPlus } from 'lucide-react'
+import { Pencil, Phone, Shield, UserMinus, UserPlus } from 'lucide-react'
+import { useAuth } from '../../../lib/auth'
+import { fetchActiveCategories, type ProfeCategory } from '../../../lib/categories'
 
 interface Player {
   id: string
@@ -16,8 +19,6 @@ interface Player {
   notes: string
   is_active: boolean
 }
-
-const CATEGORIES = ['U7', 'U9', 'U13', 'U15', 'Mayor'] as const
 
 function ageFromBirthdate(birthdate: string | null): string {
   if (!birthdate) return '—'
@@ -38,7 +39,7 @@ function waLink(phone: string): string | null {
 
 const emptyForm = {
   name: '',
-  category: 'U7',
+  category: '',
   jersey_number: '',
   birthdate: '',
   guardian_phone: '',
@@ -46,8 +47,10 @@ const emptyForm = {
 }
 
 export default function NinosPage() {
+  const { isAdmin } = useAuth()
   const [players, setPlayers] = useState<Player[]>([])
-  const [category, setCategory] = useState<string>('U7')
+  const [categories, setCategories] = useState<ProfeCategory[]>([])
+  const [category, setCategory] = useState<string>('')
   const [showInactive, setShowInactive] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -63,10 +66,19 @@ export default function NinosPage() {
       const params = new URLSearchParams()
       if (showInactive) params.set('all', '1')
       const qs = params.toString() ? `?${params}` : ''
-      const res = await fetch(`/api/players${qs}`)
+      const [res, cats] = await Promise.all([
+        fetch(`/api/players${qs}`),
+        fetchActiveCategories(),
+      ])
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error')
       setPlayers(data.players ?? [])
+      setCategories(cats)
+      setCategory((prev) => prev || cats[0]?.name || '')
+      setForm((prev) => ({
+        ...prev,
+        category: prev.category || cats[0]?.name || '',
+      }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error')
     } finally {
@@ -80,13 +92,13 @@ export default function NinosPage() {
 
   const counts = useMemo(() => {
     const map: Record<string, number> = {}
-    for (const c of CATEGORIES) map[c] = 0
+    for (const c of categories) map[c.name] = 0
     for (const p of players) {
       if (!p.is_active) continue
       map[p.category] = (map[p.category] ?? 0) + 1
     }
     return map
-  }, [players])
+  }, [players, categories])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -168,7 +180,12 @@ export default function NinosPage() {
   const softDelete = async (p: Player) => {
     if (!window.confirm(`¿Dar de baja a ${p.name}?`)) return
     const res = await fetch(`/api/players/${p.id}`, { method: 'DELETE' })
-    if (res.ok) await load()
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setError(data.error || 'No se pudo dar de baja')
+      return
+    }
+    await load()
   }
 
   const reactivate = async (p: Player) => {
@@ -210,35 +227,47 @@ export default function NinosPage() {
             Inscritos por categoría · usados en el pase de lista
           </p>
         </div>
-        <label className="inline-flex items-center gap-2 text-sm text-white/70">
-          <input
-            type="checkbox"
-            checked={showInactive}
-            onChange={(e) => setShowInactive(e.target.checked)}
-            className="rounded border-white/30"
-          />
-          Mostrar dados de baja
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          {isAdmin && (
+            <Link href="/app/admin/ninos">
+              <Button size="sm" variant="secondary" className="gap-1.5">
+                <Shield className="h-4 w-4" />
+                Admin
+              </Button>
+            </Link>
+          )}
+          {isAdmin && (
+            <label className="inline-flex items-center gap-2 text-sm text-white/70">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+                className="rounded border-white/30"
+              />
+              Mostrar dados de baja
+            </label>
+          )}
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
-        {CATEGORIES.map((c) => (
+        {categories.map((c) => (
           <button
-            key={c}
+            key={c.id}
             type="button"
             onClick={() => {
-              setCategory(c)
-              if (!editing) setForm((f) => ({ ...f, category: c }))
+              setCategory(c.name)
+              if (!editing) setForm((f) => ({ ...f, category: c.name }))
             }}
             className={cn(
               'rounded-lg px-3 py-2 text-sm transition',
-              category === c
+              category === c.name
                 ? 'bg-brand-600 text-white'
                 : 'bg-white/10 text-white/70 hover:bg-white/15'
             )}
           >
-            {c}{' '}
-            <span className="opacity-70">({counts[c] ?? 0})</span>
+            {c.name}{' '}
+            <span className="opacity-70">({counts[c.name] ?? 0})</span>
           </button>
         ))}
       </div>
@@ -314,27 +343,28 @@ export default function NinosPage() {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        {p.is_active ? (
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            title="Dar de baja"
-                            onClick={() => void softDelete(p)}
-                          >
-                            <UserMinus className="h-4 w-4 text-red-300" />
-                          </Button>
-                        ) : (
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            title="Reactivar"
-                            onClick={() => void reactivate(p)}
-                          >
-                            <UserPlus className="h-4 w-4 text-brand-300" />
-                          </Button>
-                        )}
+                        {isAdmin &&
+                          (p.is_active ? (
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              title="Dar de baja"
+                              onClick={() => void softDelete(p)}
+                            >
+                              <UserMinus className="h-4 w-4 text-red-300" />
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              title="Reactivar"
+                              onClick={() => void reactivate(p)}
+                            >
+                              <UserPlus className="h-4 w-4 text-brand-300" />
+                            </Button>
+                          ))}
                       </div>
                     </li>
                   )
@@ -373,9 +403,9 @@ export default function NinosPage() {
                   }
                   className="flex h-10 w-full rounded-md border border-white/15 bg-white/5 px-3 text-sm text-white"
                 >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c} className="bg-pitch-900">
-                      {c}
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.name} className="bg-pitch-900">
+                      {c.name}
                     </option>
                   ))}
                 </select>

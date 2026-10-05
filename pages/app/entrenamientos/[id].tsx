@@ -77,7 +77,7 @@ export default function SesionDetallePage() {
   }, [id])
 
   const handleDelete = async () => {
-    if (!id || !confirm('¿Eliminar esta sesión?')) return
+    if (!id || !confirm('¿Archivar esta sesión? Podrás restaurarla desde Admin.')) return
     const res = await fetch(`/api/entrenamientos/${id}`, { method: 'DELETE' })
     if (res.ok) await router.push('/app/entrenamientos')
   }
@@ -185,7 +185,7 @@ export default function SesionDetallePage() {
         </Link>
         <Button variant="ghost" size="sm" onClick={handleDelete}>
           <Trash2 className="mr-1.5 h-4 w-4" />
-          Eliminar
+          Archivar
         </Button>
       </div>
 

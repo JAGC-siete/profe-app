@@ -19,15 +19,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const category =
         typeof req.query.category === 'string' ? req.query.category.trim() : ''
       const templates = req.query.templates === '1' || req.query.templates === 'true'
+      const includeArchived =
+        req.query.archived === '1' || req.query.archived === 'true'
+      const onlyArchived =
+        req.query.archived === 'only'
 
       let query = supabase
         .from('profe_training_sessions')
         .select(
-          'id, coach_name, category, scheduled_date, general_objective, physical_objective, devotional_theme, is_template, created_at'
+          'id, coach_name, category, scheduled_date, general_objective, physical_objective, devotional_theme, is_template, is_archived, created_at'
         )
         .eq('company_id', companyId)
         .eq('is_template', templates)
         .order('scheduled_date', { ascending: false })
+
+      if (onlyArchived) {
+        query = query.eq('is_archived', true)
+      } else if (!includeArchived) {
+        query = query.eq('is_archived', false)
+      }
 
       if (category && category !== 'all') {
         query = query.eq('category', category)

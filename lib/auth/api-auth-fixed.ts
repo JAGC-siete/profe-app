@@ -121,7 +121,7 @@ export async function authenticateUser(
 
     if (
       requireAdmin &&
-      !['super_admin', 'company_admin', 'coach_admin'].includes(normalizedRole)
+      !['super_admin', 'company_admin'].includes(normalizedRole)
     ) {
       if (!res.headersSent) {
         res.status(403).json({ error: 'Admin privileges required' })

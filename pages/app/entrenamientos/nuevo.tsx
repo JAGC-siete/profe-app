@@ -115,6 +115,7 @@ export default function NuevaSesionPage() {
   const [coachOptions, setCoachOptions] = useState<
     { id: string; full_name: string; category: string }[]
   >([])
+  const [catalogCategories, setCatalogCategories] = useState<string[]>([])
 
   useEffect(() => {
     fetch('/api/drills')
@@ -125,12 +126,20 @@ export default function NuevaSesionPage() {
       .then((r) => r.json())
       .then((d) => setCoachOptions(d.coaches ?? []))
       .catch(() => setCoachOptions([]))
+    fetch('/api/categories')
+      .then((r) => r.json())
+      .then((d) =>
+        setCatalogCategories(
+          (d.categories ?? []).map((c: { name: string }) => c.name)
+        )
+      )
+      .catch(() => setCatalogCategories([]))
   }, [])
 
   const categoryOptions = useMemo(() => {
     const fromCoaches = coachOptions.map((c) => c.category)
-    return Array.from(new Set(['U7', 'U9', 'U13', 'U15', 'Mayor', ...fromCoaches]))
-  }, [coachOptions])
+    return Array.from(new Set([...catalogCategories, ...fromCoaches]))
+  }, [coachOptions, catalogCategories])
 
   const form = useForm<TrainingSessionInput>({
     resolver: zodResolver(trainingSessionSchema),

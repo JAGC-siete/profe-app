@@ -1,10 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { requireCompanyAccess } from '../../../lib/auth/api-auth-fixed'
+import { requireAdmin } from '../../../lib/auth/api-auth-fixed'
 import { logger } from '../../../lib/logger'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
-    const auth = await requireCompanyAccess(req, res)
+    const auth = await requireAdmin(req, res)
     const { supabase, companyId } = auth
     const id = typeof req.query.id === 'string' ? req.query.id : ''
     if (!companyId || !id) return res.status(400).json({ error: 'Parámetros inválidos' })
@@ -26,7 +26,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (error) {
     if (
       error instanceof Error &&
-      ['UNAUTHORIZED', 'PROFILE_REQUIRED', 'COMPANY_ACCESS_REQUIRED'].includes(error.message)
+      [
+        'UNAUTHORIZED',
+        'PROFILE_REQUIRED',
+        'COMPANY_ACCESS_REQUIRED',
+        'ADMIN_REQUIRED',
+        'ACCOUNT_DEACTIVATED',
+      ].includes(error.message)
     ) {
       return
     }
