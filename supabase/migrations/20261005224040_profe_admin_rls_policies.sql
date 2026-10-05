@@ -184,6 +184,10 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  -- service_role / no JWT (invite API via createAdminClient)
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
   IF private.profe_is_admin() THEN
     RETURN NEW;
   END IF;
