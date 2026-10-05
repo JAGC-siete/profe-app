@@ -35,8 +35,13 @@ body {
 }
 
 @media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
   body {
     background: white !important;
+    background-image: none !important;
   }
   .no-print {
     display: none !important;
@@ -44,5 +49,10 @@ body {
   .print-area {
     box-shadow: none !important;
     border: none !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+  .print-sheet section {
+    break-inside: avoid;
   }
 }

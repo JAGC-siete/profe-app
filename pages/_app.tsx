@@ -23,13 +23,18 @@ const syne = Syne({
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter()
-  const isAppRoute =
-    router.pathname.startsWith('/app') && router.pathname !== '/app/login'
   const isLogin = router.pathname === '/app/login'
+  const isCampo = router.pathname === '/app/entrenamientos/[id]/campo'
+  const isAppRoute =
+    router.pathname.startsWith('/app') && !isLogin
 
   return (
     <div className={cn(dmSans.variable, syne.variable, 'font-sans')}>
-      {isAppRoute ? (
+      {isCampo ? (
+        <AuthProvider>
+          <Component {...pageProps} />
+        </AuthProvider>
+      ) : isAppRoute ? (
         <AuthProvider>
           <AppShell>
             <Component {...pageProps} />

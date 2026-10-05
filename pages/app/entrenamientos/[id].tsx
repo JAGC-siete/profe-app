@@ -1,19 +1,31 @@
 import { useEffect, useState } from 'react'
 import Head from 'next/head'
+import Link from 'next/link'
 import { useRouter } from 'next/router'
 import { formatDateOnlyForHonduras } from '../../../lib/timezone'
+import type { MaterialItem } from '../../../lib/materials'
 import { Button } from '../../../components/ui/button'
 import { Input } from '../../../components/ui/input'
 import { Textarea } from '../../../components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card'
-import { Mail, Printer, Trash2 } from 'lucide-react'
+import {
+  Copy,
+  Mail,
+  MessageCircle,
+  Play,
+  Printer,
+  Trash2,
+  ClipboardCheck,
+} from 'lucide-react'
 
 interface Phase {
   id: string
   phase_name: string
   explanation: string
   variants_materials: string
+  materials_json?: MaterialItem[]
   diagram_image_url: string | null
+  duration_minutes?: number
   sort_order: number
 }
 
@@ -25,7 +37,10 @@ interface Session {
   general_objective: string
   physical_objective: string
   devotional_theme: string
+  is_template?: boolean
   phases: Phase[]
+  total_minutes?: number
+  materials?: MaterialItem[]
 }
 
 export default function SesionDetallePage() {
@@ -67,6 +82,16 @@ export default function SesionDetallePage() {
     if (res.ok) await router.push('/app/entrenamientos')
   }
 
+  const handleDuplicate = async (asTemplate = false) => {
+    const res = await fetch(`/api/entrenamientos/${id}/duplicate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ as_template: asTemplate }),
+    })
+    const data = await res.json()
+    if (res.ok) await router.push(`/app/entrenamientos/${data.id}`)
+  }
+
   const handleShare = async (e: React.FormEvent) => {
     e.preventDefault()
     setShareStatus('')
@@ -101,6 +126,14 @@ export default function SesionDetallePage() {
   }
 
   const dateLabel = formatDateOnlyForHonduras(session.scheduled_date)
+  const total = session.total_minutes ?? 0
+  const materialsLine =
+    session.materials && session.materials.length > 0
+      ? `\nMateriales: ${session.materials.map((m) => `${m.qty} ${m.item}`).join(', ')}`
+      : ''
+  const waText = encodeURIComponent(
+    `Entrenamiento ${session.category} — ${dateLabel} (${total} min)\n${session.general_objective}${materialsLine}\n${typeof window !== 'undefined' ? window.location.href : ''}`
+  )
 
   return (
     <>
@@ -111,14 +144,45 @@ export default function SesionDetallePage() {
       </Head>
 
       <div className="no-print mb-6 flex flex-wrap items-center gap-2">
+        <Link href={`/app/entrenamientos/${id}/campo`}>
+          <Button size="sm">
+            <Play className="mr-1.5 h-4 w-4" />
+            Modo cancha
+          </Button>
+        </Link>
         <Button variant="outline" size="sm" onClick={() => window.print()}>
           <Printer className="mr-1.5 h-4 w-4" />
-          Exportar / PDF
+          PDF / Imprimir
         </Button>
+        <a
+          href={`https://wa.me/?text=${waText}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Button variant="secondary" size="sm">
+            <MessageCircle className="mr-1.5 h-4 w-4" />
+            WhatsApp
+          </Button>
+        </a>
         <Button variant="secondary" size="sm" onClick={() => setShareOpen((v) => !v)}>
           <Mail className="mr-1.5 h-4 w-4" />
-          Compartir
+          Email
         </Button>
+        <Button variant="ghost" size="sm" onClick={() => void handleDuplicate(false)}>
+          <Copy className="mr-1.5 h-4 w-4" />
+          Duplicar
+        </Button>
+        {!session.is_template && (
+          <Button variant="ghost" size="sm" onClick={() => void handleDuplicate(true)}>
+            Guardar plantilla
+          </Button>
+        )}
+        <Link href={`/app/entrenamientos/${id}/cierre`}>
+          <Button variant="ghost" size="sm">
+            <ClipboardCheck className="mr-1.5 h-4 w-4" />
+            Cierre
+          </Button>
+        </Link>
         <Button variant="ghost" size="sm" onClick={handleDelete}>
           <Trash2 className="mr-1.5 h-4 w-4" />
           Eliminar
@@ -167,10 +231,11 @@ export default function SesionDetallePage() {
         <header className="border-b border-white/10 pb-4 print:border-slate-200">
           <p className="font-display text-sm font-semibold uppercase tracking-widest text-brand-300 print:text-emerald-700">
             Profe · hoja de entrenamiento
+            {session.is_template ? ' · plantilla' : ''}
           </p>
           <h1 className="mt-2 font-display text-3xl font-bold">{session.category}</h1>
           <p className="mt-2 text-white/70 print:text-slate-600">
-            {dateLabel} · {session.coach_name}
+            {dateLabel} · {session.coach_name} · {total} min
           </p>
         </header>
 
@@ -180,15 +245,38 @@ export default function SesionDetallePage() {
           <ObjectiveBlock title="Tema devocional" body={session.devotional_theme} />
         </section>
 
+        {session.materials && session.materials.length > 0 ? (
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-white/50 print:text-slate-500">
+              Materiales
+            </h3>
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {session.materials.map((m) => (
+                <li
+                  key={m.item}
+                  className="rounded-md bg-brand-600/20 px-2.5 py-1 text-sm print:bg-emerald-50 print:text-emerald-900"
+                >
+                  {m.qty} {m.item}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         <section className="space-y-4">
           {session.phases.map((phase) => (
             <div
               key={phase.id}
               className="rounded-lg border border-white/10 bg-black/20 p-4 print:border-slate-200 print:bg-transparent"
             >
-              <h2 className="font-display text-lg font-semibold text-brand-200 print:text-emerald-800">
-                {phase.phase_name}
-              </h2>
+              <div className="flex items-baseline justify-between gap-2">
+                <h2 className="font-display text-lg font-semibold text-brand-200 print:text-emerald-800">
+                  {phase.phase_name}
+                </h2>
+                <span className="text-sm text-white/50 print:text-slate-500">
+                  {phase.duration_minutes ?? 0} min
+                </span>
+              </div>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">
                 {phase.explanation}
               </p>

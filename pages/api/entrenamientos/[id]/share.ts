@@ -4,6 +4,7 @@ import { requireCompanyAccess } from '../../../../lib/auth/api-auth-fixed'
 import { shareSessionSchema } from '../../../../lib/validations/training-session'
 import { getResendFromNoreply } from '../../../../lib/resend-from'
 import { formatDateOnlyForHonduras } from '../../../../lib/timezone'
+import { aggregateMaterials, totalDurationMinutes } from '../../../../lib/materials'
 import { logger } from '../../../../lib/logger'
 import { env } from '../../../../lib/env'
 
@@ -39,7 +40,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         `
         id, coach_name, category, scheduled_date,
         general_objective, physical_objective, devotional_theme,
-        profe_training_phases (phase_name, explanation, variants_materials, sort_order)
+        profe_training_phases (
+          phase_name, explanation, variants_materials, materials_json,
+          duration_minutes, sort_order
+        )
       `
       )
       .eq('id', id)
@@ -60,6 +64,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const dateLabel = formatDateOnlyForHonduras(session.scheduled_date)
     const siteUrl = env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')
     const link = `${siteUrl}/app/entrenamientos/${session.id}`
+    const totalMin = totalDurationMinutes(phases)
+    const materials = aggregateMaterials(phases)
+    const materialsHtml =
+      materials.length > 0
+        ? `<p><strong>Materiales totales:</strong> ${escapeHtml(
+            materials.map((m) => `${m.qty} ${m.item}`).join(', ')
+          )}</p>`
+        : ''
 
     const phasesHtml = phases
       .map(
@@ -67,8 +79,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           phase_name: string
           explanation: string
           variants_materials: string
+          duration_minutes?: number
         }) => `
-        <h3 style="margin:16px 0 4px;color:#065f46">${p.phase_name}</h3>
+        <h3 style="margin:16px 0 4px;color:#065f46">${escapeHtml(p.phase_name)} (${Number(p.duration_minutes) || 0} min)</h3>
         <p style="margin:0 0 4px">${escapeHtml(p.explanation)}</p>
         ${
           p.variants_materials
@@ -87,8 +100,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       <div style="font-family:system-ui,sans-serif;max-width:640px;margin:0 auto;color:#111">
         <h1 style="color:#047857;font-size:22px">Plan de entrenamiento — ${escapeHtml(session.category)}</h1>
         <p><strong>Fecha:</strong> ${dateLabel}<br/>
-        <strong>Entrenador:</strong> ${escapeHtml(session.coach_name)}</p>
+        <strong>Entrenador:</strong> ${escapeHtml(session.coach_name)}<br/>
+        <strong>Duración total:</strong> ${totalMin} min</p>
         ${note}
+        ${materialsHtml}
         <p><strong>Objetivo general:</strong> ${escapeHtml(session.general_objective)}</p>
         ${
           session.physical_objective

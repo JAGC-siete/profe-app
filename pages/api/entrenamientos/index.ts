@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { requireCompanyAccess } from '../../../lib/auth/api-auth-fixed'
 import { trainingSessionSchema } from '../../../lib/validations/training-session'
+import { parseMaterialsText, totalDurationMinutes } from '../../../lib/materials'
 import { logger } from '../../../lib/logger'
 import { getTodayInHonduras } from '../../../lib/timezone'
 
@@ -16,13 +17,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (req.method === 'GET') {
       const category =
         typeof req.query.category === 'string' ? req.query.category.trim() : ''
+      const templates = req.query.templates === '1' || req.query.templates === 'true'
 
       let query = supabase
         .from('profe_training_sessions')
         .select(
-          'id, coach_name, category, scheduled_date, general_objective, physical_objective, devotional_theme, created_at'
+          'id, coach_name, category, scheduled_date, general_objective, physical_objective, devotional_theme, is_template, created_at'
         )
         .eq('company_id', companyId)
+        .eq('is_template', templates)
         .order('scheduled_date', { ascending: false })
 
       if (category && category !== 'all') {
@@ -61,6 +64,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           general_objective: input.general_objective,
           physical_objective: input.physical_objective,
           devotional_theme: input.devotional_theme,
+          is_template: Boolean(input.is_template),
         })
         .select('id')
         .single()
@@ -73,15 +77,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: 'No se pudo crear la sesión' })
       }
 
-      const phases = input.phases.map((phase, index) => ({
-        session_id: session.id,
-        company_id: companyId,
-        phase_name: phase.phase_name,
-        explanation: phase.explanation,
-        variants_materials: phase.variants_materials,
-        diagram_image_url: phase.diagram_image_url || null,
-        sort_order: phase.sort_order ?? index,
-      }))
+      const phases = input.phases.map((phase, index) => {
+        const materials =
+          phase.materials_json?.length > 0
+            ? phase.materials_json
+            : parseMaterialsText(phase.variants_materials)
+        return {
+          session_id: session.id,
+          company_id: companyId,
+          phase_name: phase.phase_name,
+          explanation: phase.explanation,
+          variants_materials: phase.variants_materials,
+          materials_json: materials,
+          diagram_image_url: phase.diagram_image_url || null,
+          duration_minutes: phase.duration_minutes ?? 0,
+          sort_order: phase.sort_order ?? index,
+        }
+      })
 
       const { error: phasesError } = await supabase
         .from('profe_training_phases')
@@ -96,8 +108,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: 'No se pudieron guardar las fases' })
       }
 
-      logger.info('Session created', { sessionId: session.id, companyId })
-      return res.status(201).json({ id: session.id })
+      logger.info('Session created', {
+        sessionId: session.id,
+        companyId,
+        totalMinutes: totalDurationMinutes(phases),
+      })
+      return res.status(201).json({
+        id: session.id,
+        total_minutes: totalDurationMinutes(phases),
+      })
     }
 
     return res.status(405).json({ error: 'Method not allowed' })
