@@ -25,7 +25,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         coach_name, category, general_objective, physical_objective, devotional_theme,
         profe_training_phases (
           phase_name, explanation, variants_materials, materials_json,
-          diagram_image_url, duration_minutes, sort_order
+          diagram_image_url, diagram_scene_json, duration_minutes, sort_order
         )
       `
       )
@@ -72,6 +72,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             variants_materials: string
             materials_json: unknown
             diagram_image_url: string | null
+            diagram_scene_json?: unknown
             duration_minutes: number
             sort_order: number
           },
@@ -84,6 +85,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           variants_materials: p.variants_materials,
           materials_json: p.materials_json ?? [],
           diagram_image_url: p.diagram_image_url,
+          diagram_scene_json: p.diagram_scene_json ?? {},
           duration_minutes: p.duration_minutes ?? 0,
           sort_order: p.sort_order ?? index,
         })

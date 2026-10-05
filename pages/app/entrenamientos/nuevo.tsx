@@ -27,6 +27,12 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { DynamicPitchEditor } from '../../../components/pitch/dynamic'
+import {
+  hasSceneContent,
+  parseDiagramScene,
+  type DiagramScene,
+} from '../../../lib/pitch'
 
 interface DrillOption {
   id: string
@@ -35,6 +41,7 @@ interface DrillOption {
   variants_materials: string
   materials_json?: { item: string; qty: number }[]
   diagram_image_url?: string | null
+  diagram_scene_json?: DiagramScene | Record<string, unknown> | null
   category?: string | null
 }
 
@@ -45,6 +52,7 @@ function emptyPhase(phase_name: string, sort_order: number) {
     variants_materials: '',
     materials_json: [] as { item: string; qty: number }[],
     diagram_image_url: '',
+    diagram_scene_json: {},
     duration_minutes: 15,
     sort_order,
   }
@@ -68,6 +76,7 @@ export default function NuevaSesionPage() {
   const [dragOver, setDragOver] = useState<number | null>(null)
   const [drillModal, setDrillModal] = useState<DrillModalMode | null>(null)
   const [drillQuery, setDrillQuery] = useState('')
+  const [pitchEditorIndex, setPitchEditorIndex] = useState<number | null>(null)
 
   useEffect(() => {
     fetch('/api/drills')
@@ -159,6 +168,7 @@ export default function NuevaSesionPage() {
         variants_materials: drill.variants_materials ?? '',
         materials_json: drill.materials_json ?? [],
         diagram_image_url: drill.diagram_image_url || '',
+        diagram_scene_json: drill.diagram_scene_json ?? {},
         duration_minutes: 15,
         sort_order: fields.length,
       })
@@ -179,6 +189,11 @@ export default function NuevaSesionPage() {
       form.setValue(
         `phases.${i}.diagram_image_url`,
         drill.diagram_image_url || '',
+        { shouldDirty: true }
+      )
+      form.setValue(
+        `phases.${i}.diagram_scene_json`,
+        drill.diagram_scene_json ?? {},
         { shouldDirty: true }
       )
       setPhaseCollapsed(fields[i]?.id ?? '', false)
@@ -248,6 +263,7 @@ export default function NuevaSesionPage() {
           variants_materials: phase.variants_materials || '',
           materials_json: mats,
           diagram_image_url: phase.diagram_image_url || '',
+          diagram_scene_json: phase.diagram_scene_json ?? {},
           tags: [],
           category: category || null,
         }),
@@ -617,6 +633,14 @@ export default function NuevaSesionPage() {
                         Diseño de ejercicio
                       </label>
                       <div className="flex flex-wrap items-center gap-3">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setPitchEditorIndex(index)}
+                        >
+                          Editor 3D
+                        </Button>
                         <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm hover:bg-white/10">
                           <Camera className="h-4 w-4" />
                           {uploadingIndex === index ? 'Subiendo…' : 'Cámara'}
@@ -648,13 +672,19 @@ export default function NuevaSesionPage() {
                             }}
                           />
                         </label>
-                        {diagramUrl ? (
+                        {diagramUrl ||
+                        hasSceneContent(
+                          parseDiagramScene(
+                            form.getValues(`phases.${index}.diagram_scene_json`)
+                          )
+                        ) ? (
                           <button
                             type="button"
                             className="inline-flex items-center gap-1 text-sm text-red-300"
-                            onClick={() =>
+                            onClick={() => {
                               form.setValue(`phases.${index}.diagram_image_url`, '')
-                            }
+                              form.setValue(`phases.${index}.diagram_scene_json`, {})
+                            }}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                             Quitar
@@ -701,6 +731,25 @@ export default function NuevaSesionPage() {
           </Button>
         </div>
       </form>
+
+      {pitchEditorIndex != null ? (
+        <DynamicPitchEditor
+          initialScene={parseDiagramScene(
+            form.getValues(`phases.${pitchEditorIndex}.diagram_scene_json`)
+          )}
+          onCancel={() => setPitchEditorIndex(null)}
+          onSave={(scene, imageUrl) => {
+            form.setValue(`phases.${pitchEditorIndex}.diagram_scene_json`, scene, {
+              shouldDirty: true,
+            })
+            form.setValue(`phases.${pitchEditorIndex}.diagram_image_url`, imageUrl, {
+              shouldDirty: true,
+              shouldValidate: true,
+            })
+            setPitchEditorIndex(null)
+          }}
+        />
+      ) : null}
 
       {drillModal ? (
         <div

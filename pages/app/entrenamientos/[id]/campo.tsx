@@ -5,6 +5,16 @@ import { useRouter } from 'next/router'
 import { useAuth } from '../../../../lib/auth'
 import { Button } from '../../../../components/ui/button'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import {
+  DynamicPitchCanvas,
+  DynamicPitchPlayer,
+} from '../../../../components/pitch/dynamic'
+import {
+  hasAnimation,
+  hasSceneContent,
+  parseDiagramScene,
+  type DiagramScene,
+} from '../../../../lib/pitch'
 
 interface Phase {
   id: string
@@ -13,6 +23,7 @@ interface Phase {
   variants_materials: string
   duration_minutes?: number
   diagram_image_url: string | null
+  diagram_scene_json?: DiagramScene | Record<string, unknown> | null
 }
 
 interface Session {
@@ -98,6 +109,10 @@ export default function ModoCampoPage() {
   const phase = phases[index]
   if (!phase) return <p className="p-6">Sin fases</p>
 
+  const scene = parseDiagramScene(phase.diagram_scene_json)
+  const showPlayer = hasSceneContent(scene) && hasAnimation(scene)
+  const showStaticScene = hasSceneContent(scene) && !hasAnimation(scene)
+
   return (
     <>
       <Head>
@@ -140,7 +155,13 @@ export default function ModoCampoPage() {
               {phase.variants_materials}
             </p>
           ) : null}
-          {phase.diagram_image_url ? (
+          {showPlayer && scene ? (
+            <DynamicPitchPlayer scene={scene} />
+          ) : showStaticScene && scene ? (
+            <div className="mt-6 h-[42vh] min-h-[220px] overflow-hidden rounded-lg border border-white/10">
+              <DynamicPitchCanvas scene={scene} className="h-full w-full" />
+            </div>
+          ) : phase.diagram_image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={phase.diagram_image_url}

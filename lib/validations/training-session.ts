@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { diagramSceneJsonSchema } from '../pitch/schema'
 
 export const PHASE_PRESETS = [
   'Orientación',
@@ -24,6 +25,7 @@ export const trainingPhaseSchema = z.object({
   variants_materials: z.string().max(2000),
   materials_json: z.array(materialItemSchema).max(40),
   diagram_image_url: z.union([z.string().url('URL de diagrama inválida'), z.literal('')]),
+  diagram_scene_json: diagramSceneJsonSchema.optional(),
   duration_minutes: z
     .number()
     .int()
@@ -62,6 +64,7 @@ export const drillSchema = z.object({
     .union([z.string().url(), z.literal(''), z.null()])
     .optional()
     .nullable(),
+  diagram_scene_json: diagramSceneJsonSchema.optional(),
   tags: z.array(z.string().max(40)).max(20).optional().default([]),
   category: z.string().max(80).optional().nullable(),
 })

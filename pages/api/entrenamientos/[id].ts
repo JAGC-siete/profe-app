@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { requireCompanyAccess } from '../../../lib/auth/api-auth-fixed'
 import { trainingSessionSchema } from '../../../lib/validations/training-session'
+import { sceneForDb } from '../../../lib/pitch/schema'
 import {
   aggregateMaterials,
   parseMaterialsText,
@@ -29,7 +30,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           created_at, updated_at,
           profe_training_phases (
             id, phase_name, explanation, variants_materials,
-            materials_json, diagram_image_url, duration_minutes, sort_order
+            materials_json, diagram_image_url, diagram_scene_json,
+            duration_minutes, sort_order
           )
         `
         )
@@ -112,6 +114,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           variants_materials: phase.variants_materials,
           materials_json: materials,
           diagram_image_url: phase.diagram_image_url || null,
+          diagram_scene_json: sceneForDb(phase.diagram_scene_json),
           duration_minutes: phase.duration_minutes ?? 0,
           sort_order: phase.sort_order ?? index,
         }

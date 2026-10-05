@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { requireCompanyAccess } from '../../../lib/auth/api-auth-fixed'
 import { drillSchema } from '../../../lib/validations/training-session'
+import { sceneForDb } from '../../../lib/pitch/schema'
 import { parseMaterialsText } from '../../../lib/materials'
 import { logger } from '../../../lib/logger'
 
@@ -15,7 +16,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       let query = supabase
         .from('profe_drills')
         .select(
-          'id, name, explanation, variants_materials, materials_json, diagram_image_url, tags, category, created_at'
+          'id, name, explanation, variants_materials, materials_json, diagram_image_url, diagram_scene_json, tags, category, created_at'
         )
         .eq('company_id', companyId)
         .order('name')
@@ -51,6 +52,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           variants_materials: input.variants_materials || '',
           materials_json: materials,
           diagram_image_url: input.diagram_image_url || null,
+          diagram_scene_json: sceneForDb(input.diagram_scene_json),
           tags: input.tags || [],
           category: input.category || null,
         })

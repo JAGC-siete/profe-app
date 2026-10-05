@@ -11,11 +11,14 @@
     "build": "next build",
     "start": "next start -p ${PORT:-8080}",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:pitch": "npx --yes tsx lib/pitch/animation.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
     "@radix-ui/react-slot": "^1.2.3",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.1",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.52.1",
     "class-variance-authority": "^0.7.1",
@@ -29,13 +32,16 @@
     "react-hook-form": "^7.62.0",
     "resend": "^4.0.0",
     "tailwind-merge": "^3.3.1",
-    "zod": "^4.1.5"
+    "three": "^0.186.1",
+    "zod": "^4.1.5",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@types/cookie": "^0.6.0",
     "@types/node": "^24.1.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.5",
+    "@types/three": "^0.186.0",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.31.0",
     "eslint-config-next": "^15.4.1",
