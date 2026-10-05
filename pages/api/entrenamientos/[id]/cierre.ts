@@ -36,10 +36,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           .maybeSingle(),
         supabase
           .from('profe_players')
-          .select('id, name, category, is_active')
+          .select('id, name, category, jersey_number, is_active')
           .eq('company_id', companyId)
           .eq('category', session.category)
           .eq('is_active', true)
+          .order('jersey_number', { ascending: true, nullsFirst: false })
           .order('name'),
       ])
       return res.status(200).json({

@@ -70,8 +70,34 @@ export const drillSchema = z.object({
 })
 
 export const playerSchema = z.object({
-  name: z.string().min(1).max(120),
-  category: z.string().min(1).max(80),
+  name: z.string().min(1, 'Nombre requerido').max(120),
+  category: z.string().min(1, 'Categoría requerida').max(80),
+  jersey_number: z
+    .union([z.number().int().min(1).max(99), z.null()])
+    .optional()
+    .nullable(),
+  birthdate: z
+    .union([
+      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha YYYY-MM-DD'),
+      z.literal(''),
+      z.null(),
+    ])
+    .optional()
+    .nullable(),
+  guardian_phone: z.string().max(40).optional().default(''),
+  notes: z.string().max(500).optional().default(''),
+  is_active: z.boolean().optional().default(true),
+})
+
+export const playerUpdateSchema = playerSchema.partial().extend({
+  name: z.string().min(1).max(120).optional(),
+  category: z.string().min(1).max(80).optional(),
+})
+
+export const coachSchema = z.object({
+  full_name: z.string().min(2, 'Nombre requerido').max(120),
+  category: z.string().min(1, 'Categoría requerida').max(80),
+  notes: z.string().max(500).optional().default(''),
   is_active: z.boolean().optional().default(true),
 })
 

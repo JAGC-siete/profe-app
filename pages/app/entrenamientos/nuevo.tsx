@@ -112,13 +112,25 @@ export default function NuevaSesionPage() {
   const [drillQuery, setDrillQuery] = useState('')
   const [pitchEditorIndex, setPitchEditorIndex] = useState<number | null>(null)
   const [prefsReady, setPrefsReady] = useState(false)
+  const [coachOptions, setCoachOptions] = useState<
+    { id: string; full_name: string; category: string }[]
+  >([])
 
   useEffect(() => {
     fetch('/api/drills')
       .then((r) => r.json())
       .then((d) => setDrills(d.drills ?? []))
       .catch(() => setDrills([]))
+    fetch('/api/coaches')
+      .then((r) => r.json())
+      .then((d) => setCoachOptions(d.coaches ?? []))
+      .catch(() => setCoachOptions([]))
   }, [])
+
+  const categoryOptions = useMemo(() => {
+    const fromCoaches = coachOptions.map((c) => c.category)
+    return Array.from(new Set(['U7', 'U9', 'U13', 'U15', 'Mayor', ...fromCoaches]))
+  }, [coachOptions])
 
   const form = useForm<TrainingSessionInput>({
     resolver: zodResolver(trainingSessionSchema),
@@ -133,6 +145,13 @@ export default function NuevaSesionPage() {
       phases: defaultPhases,
     },
   })
+
+  const selectedCategory = form.watch('category')
+  const coachesForCategory = useMemo(() => {
+    if (!selectedCategory) return coachOptions
+    const matched = coachOptions.filter((c) => c.category === selectedCategory)
+    return matched.length > 0 ? matched : coachOptions
+  }, [coachOptions, selectedCategory])
 
   useEffect(() => {
     const prefs = readSessionPrefs()
@@ -541,17 +560,39 @@ export default function NuevaSesionPage() {
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <Field label="Entrenador" error={form.formState.errors.coach_name?.message}>
               <Input
+                list="coach-options"
                 {...form.register('coach_name')}
                 placeholder="Nombre del entrenador"
                 autoComplete="name"
               />
+              <datalist id="coach-options">
+                {coachesForCategory.map((c) => (
+                  <option key={c.id} value={c.full_name}>
+                    {c.category}
+                  </option>
+                ))}
+              </datalist>
             </Field>
             <Field label="Categoría" error={form.formState.errors.category?.message}>
               <Input
-                {...form.register('category')}
-                placeholder="Hope U7"
+                list="category-options"
+                {...form.register('category', {
+                  onChange: (e) => {
+                    const cat = e.target.value
+                    const match = coachOptions.find((c) => c.category === cat)
+                    if (match && !form.getValues('coach_name')) {
+                      form.setValue('coach_name', match.full_name, { shouldDirty: true })
+                    }
+                  },
+                })}
+                placeholder="U7"
                 autoComplete="off"
               />
+              <datalist id="category-options">
+                {categoryOptions.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
             </Field>
             <Field label="Fecha" error={form.formState.errors.scheduled_date?.message}>
               <Input type="date" {...form.register('scheduled_date')} />

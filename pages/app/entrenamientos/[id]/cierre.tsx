@@ -12,6 +12,7 @@ interface Player {
   id: string
   name: string
   category: string
+  jersey_number?: number | null
 }
 
 export default function CierreSesionPage() {
@@ -143,7 +144,12 @@ export default function CierreSesionPage() {
                         : 'bg-white/5 text-white/40 line-through'
                     )}
                   >
-                    <span>{p.name}</span>
+                    <span>
+                      {p.jersey_number != null ? (
+                        <span className="mr-2 text-brand-300">#{p.jersey_number}</span>
+                      ) : null}
+                      {p.name}
+                    </span>
                     <span className="text-sm">
                       {present[p.id] !== false ? 'Presente' : 'Ausente'}
                     </span>

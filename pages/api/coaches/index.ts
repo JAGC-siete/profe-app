@@ -1,24 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { requireCompanyAccess } from '../../../lib/auth/api-auth-fixed'
-import { playerSchema } from '../../../lib/validations/training-session'
+import { coachSchema } from '../../../lib/validations/training-session'
 import { logger } from '../../../lib/logger'
-
-const PLAYER_SELECT =
-  'id, name, category, jersey_number, birthdate, guardian_phone, notes, is_active, created_at'
-
-function normalizeBirthdate(
-  value: string | null | undefined
-): string | null {
-  if (!value || value === '') return null
-  return value
-}
-
-function normalizeJersey(
-  value: number | null | undefined
-): number | null {
-  if (value == null || Number.isNaN(value)) return null
-  return value
-}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
@@ -32,51 +15,47 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const includeInactive = req.query.all === '1' || req.query.all === 'true'
 
       let query = supabase
-        .from('profe_players')
-        .select(PLAYER_SELECT)
+        .from('profe_coaches')
+        .select('id, full_name, category, notes, is_active, created_at')
         .eq('company_id', companyId)
-        .order('jersey_number', { ascending: true, nullsFirst: false })
-        .order('name')
+        .order('category')
+        .order('full_name')
 
       if (!includeInactive) query = query.eq('is_active', true)
       if (category) query = query.eq('category', category)
 
       const { data, error } = await query
       if (error) {
-        logger.error('List players failed', { error: error.message })
-        return res.status(500).json({ error: 'No se pudieron listar jugadores' })
+        logger.error('List coaches failed', { error: error.message })
+        return res.status(500).json({ error: 'No se pudieron listar profes' })
       }
-      return res.status(200).json({ players: data ?? [] })
+      return res.status(200).json({ coaches: data ?? [] })
     }
 
     if (req.method === 'POST') {
-      const parsed = playerSchema.safeParse(req.body)
+      const parsed = coachSchema.safeParse(req.body)
       if (!parsed.success) {
         return res.status(400).json({
           error: 'Validación fallida',
           details: parsed.error.flatten(),
         })
       }
-      const input = parsed.data
       const { data, error } = await supabase
-        .from('profe_players')
+        .from('profe_coaches')
         .insert({
           company_id: companyId,
-          name: input.name.trim(),
-          category: input.category.trim(),
-          jersey_number: normalizeJersey(input.jersey_number),
-          birthdate: normalizeBirthdate(input.birthdate),
-          guardian_phone: (input.guardian_phone ?? '').trim(),
-          notes: (input.notes ?? '').trim(),
-          is_active: Boolean(input.is_active),
+          full_name: parsed.data.full_name.trim(),
+          category: parsed.data.category.trim(),
+          notes: parsed.data.notes ?? '',
+          is_active: Boolean(parsed.data.is_active),
         })
-        .select(PLAYER_SELECT)
+        .select('id, full_name, category, notes, is_active')
         .single()
       if (error || !data) {
-        logger.error('Create player failed', { error: error?.message })
-        return res.status(500).json({ error: 'No se pudo crear jugador' })
+        logger.error('Create coach failed', { error: error?.message })
+        return res.status(500).json({ error: 'No se pudo crear el profe' })
       }
-      return res.status(201).json({ player: data })
+      return res.status(201).json({ coach: data })
     }
 
     return res.status(405).json({ error: 'Method not allowed' })

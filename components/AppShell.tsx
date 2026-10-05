@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { useRouter } from 'next/router'
-import { LogOut, ClipboardList, Plus, Library } from 'lucide-react'
+import { LogOut, ClipboardList, Plus, Library, Users, Baby } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { Button } from './ui/button'
 import { cn } from '../lib/utils'
@@ -53,6 +53,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 router.pathname.startsWith('/app/entrenamientos') &&
                   router.pathname !== '/app/entrenamientos/nuevo' &&
                   router.pathname !== '/app/entrenamientos/drills' &&
+                  router.pathname !== '/app/entrenamientos/profes' &&
+                  router.pathname !== '/app/entrenamientos/ninos' &&
                   'bg-white/10 text-white'
               )}
             >
@@ -68,6 +70,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Library className="h-4 w-4" />
               <span className="hidden sm:inline">Drills</span>
+            </Link>
+            <Link
+              href="/app/entrenamientos/profes"
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white',
+                router.pathname === '/app/entrenamientos/profes' && 'bg-white/10 text-white'
+              )}
+            >
+              <Users className="h-4 w-4" />
+              <span className="hidden sm:inline">Profes</span>
+            </Link>
+            <Link
+              href="/app/entrenamientos/ninos"
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white',
+                router.pathname === '/app/entrenamientos/ninos' && 'bg-white/10 text-white'
+              )}
+            >
+              <Baby className="h-4 w-4" />
+              <span className="hidden sm:inline">Niños</span>
             </Link>
             <Link href="/app/entrenamientos/nuevo" aria-current={router.pathname === '/app/entrenamientos/nuevo' ? 'page' : undefined}>
               <Button
