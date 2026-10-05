@@ -5,6 +5,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import {
   applyPositionsToElements,
   sampleNormalizedAnimation,
+  STROKE_PALETTE,
   type DiagramScene,
 } from '../../lib/pitch'
 import { usePitchStore } from '../../lib/pitch/store'
@@ -16,8 +17,9 @@ import {
   PitchSceneInner,
   type GlApi,
 } from './PitchSceneCore'
-import { capturePitchDataUrl, uploadPitchCapture } from './exportTopDown'
+import { capturePitchWithStrokes, uploadPitchCapture } from './exportTopDown'
 import { TokenDragBridge } from './TokenDragControls'
+import { DrawingOverlay } from './DrawingOverlay'
 
 export function PitchEditorV2({
   initialScene,
@@ -45,6 +47,14 @@ export function PitchEditorV2({
   const duplicateFrame = usePitchStore((s) => s.duplicateFrame)
   const deleteFrame = usePitchStore((s) => s.deleteFrame)
   const toScene = usePitchStore((s) => s.toScene)
+  const strokes = usePitchStore((s) => s.strokes)
+  const drawTool = usePitchStore((s) => s.drawTool)
+  const strokeColor = usePitchStore((s) => s.strokeColor)
+  const setDrawTool = usePitchStore((s) => s.setDrawTool)
+  const setStrokeColor = usePitchStore((s) => s.setStrokeColor)
+  const addStroke = usePitchStore((s) => s.addStroke)
+  const eraseAt = usePitchStore((s) => s.eraseAt)
+  const clearStrokes = usePitchStore((s) => s.clearStrokes)
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -151,7 +161,10 @@ export function PitchEditorV2({
     try {
       await new Promise((r) => requestAnimationFrame(() => r(null)))
       const scene = toScene()
-      const dataUrl = capturePitchDataUrl(glApi.current)
+      const dataUrl = await capturePitchWithStrokes(
+        glApi.current,
+        scene.strokes ?? []
+      )
       const url = await uploadPitchCapture(dataUrl)
       onSave(scene, url)
     } catch (err) {
@@ -162,9 +175,11 @@ export function PitchEditorV2({
   }
 
   const onPointerDownElement = (id: string, e: ThreeEvent<PointerEvent>) => {
-    if (playing) return
+    if (playing || drawTool !== 'none') return
     beginDragRef.current?.(id, e)
   }
+
+  const drawingMode = drawTool !== 'none'
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col bg-[#07140c] text-white">
@@ -174,7 +189,7 @@ export function PitchEditorV2({
             Editor de cancha V2
           </p>
           <p className="font-display text-lg font-semibold">
-            Drag + keyframes
+            Drag + keyframes + flechas
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -207,13 +222,60 @@ export function PitchEditorV2({
           type="button"
           size="sm"
           variant="outline"
-          disabled={!selectedId}
+          disabled={!selectedId || drawingMode}
           onClick={removeSelected}
         >
           Eliminar
         </Button>
+        <span className="mx-1 h-5 w-px bg-white/15" />
+        <Button
+          type="button"
+          size="sm"
+          variant={drawTool === 'none' ? 'secondary' : 'outline'}
+          onClick={() => setDrawTool('none')}
+        >
+          Mover
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={drawTool === 'arrow' ? 'secondary' : 'outline'}
+          onClick={() => setDrawTool('arrow')}
+        >
+          Flecha
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={drawTool === 'eraser' ? 'secondary' : 'outline'}
+          onClick={() => setDrawTool('eraser')}
+        >
+          Goma
+        </Button>
+        {STROKE_PALETTE.map((c) => (
+          <button
+            key={c}
+            type="button"
+            title={c}
+            onClick={() => setStrokeColor(c)}
+            className={`h-7 w-7 rounded-full border-2 ${
+              strokeColor === c ? 'border-white' : 'border-transparent'
+            }`}
+            style={{ backgroundColor: c }}
+          />
+        ))}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={strokes.length === 0}
+          onClick={clearStrokes}
+        >
+          Limpiar trazos
+        </Button>
         <span className="ml-auto self-center text-xs text-white/50">
           {elements.length} elementos · {frames.length} frames
+          {strokes.length ? ` · ${strokes.length} trazos` : ''}
         </span>
       </div>
 
@@ -323,11 +385,11 @@ export function PitchEditorV2({
             scene={sceneForRender}
             selectedId={selectedId}
             onSelect={(id) => {
-              if (!playing) setSelectedId(id)
+              if (!playing && drawTool === 'none') setSelectedId(id)
             }}
             onPointerDownElement={onPointerDownElement}
             enableOrbit
-            orbitEnabled={orbitEnabled && !playing}
+            orbitEnabled={orbitEnabled && !playing && !drawingMode}
           >
             <TokenDragBridge
               pitchType={pitchType}
@@ -337,6 +399,14 @@ export function PitchEditorV2({
             <ExportBridge onReady={onReady} />
           </PitchSceneInner>
         </PitchCanvasShell>
+        <DrawingOverlay
+          strokes={strokes}
+          tool={playing ? 'none' : drawTool}
+          color={strokeColor}
+          interactive={!playing}
+          onAddStroke={addStroke}
+          onEraseAt={eraseAt}
+        />
       </div>
     </div>
   )

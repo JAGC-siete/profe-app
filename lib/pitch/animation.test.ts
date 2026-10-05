@@ -8,6 +8,7 @@ import {
   legacyStepsToFrames,
   normalizeAnimation,
 } from './animation'
+import { arrowControlPoint, strokeHitsPoint } from './overlayGeometry'
 import type { DiagramScene } from './types'
 
 function assert(cond: unknown, msg: string) {
@@ -83,6 +84,28 @@ const baseScene: DiagramScene = {
     0.5
   )
   assert(mid.p1.x === 50 && mid.p1.z === 50, 'midpoint')
+}
+
+// overlay geometry
+{
+  const c = arrowControlPoint({ x: 0, y: 0 }, { x: 1, y: 0 }, 'convex')
+  assert(typeof c.x === 'number' && typeof c.y === 'number', 'control point')
+  const hit = strokeHitsPoint(
+    {
+      id: 's1',
+      kind: 'arrow',
+      color: '#F2D98A',
+      width: 0.01,
+      points: [
+        { x: 0.1, y: 0.1 },
+        { x: 0.9, y: 0.1 },
+      ],
+      curvature: 'flat',
+    },
+    0.5,
+    0.1
+  )
+  assert(hit, 'arrow hit-test')
 }
 
 console.log('pitch animation tests OK')

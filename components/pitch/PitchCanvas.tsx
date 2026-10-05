@@ -2,6 +2,7 @@
 
 import type { DiagramScene } from '../../lib/pitch'
 import { PitchCanvasShell, PitchSceneInner } from './PitchSceneCore'
+import { DrawingOverlay } from './DrawingOverlay'
 
 export function PitchCanvas({
   scene,
@@ -11,8 +12,16 @@ export function PitchCanvas({
   className?: string
 }) {
   return (
-    <PitchCanvasShell className={className}>
-      <PitchSceneInner scene={scene} />
-    </PitchCanvasShell>
+    <div className={`relative ${className}`}>
+      <PitchCanvasShell className="h-full w-full">
+        <PitchSceneInner scene={scene} />
+      </PitchCanvasShell>
+      <DrawingOverlay
+        strokes={scene.strokes ?? []}
+        tool="none"
+        color="#F2D98A"
+        interactive={false}
+      />
+    </div>
   )
 }

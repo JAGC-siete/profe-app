@@ -8,16 +8,24 @@ import {
 } from './animation'
 import { cloneScene, EMPTY_DIAGRAM_SCENE } from './defaults'
 import { newElementId } from './coords'
+import { strokeHitsPoint } from './overlayGeometry'
 import type {
   DiagramScene,
+  DrawTool,
   KeyframePositions,
   PitchElement,
   PitchElementType,
   PitchKeyframe,
+  PitchStroke,
   PitchTeam,
   PitchType,
+  StrokeColor,
 } from './types'
-import { MAX_PITCH_ELEMENTS, MAX_PITCH_FRAMES } from './types'
+import {
+  MAX_PITCH_ELEMENTS,
+  MAX_PITCH_FRAMES,
+  MAX_PITCH_STROKES,
+} from './types'
 
 type PitchStore = {
   pitchType: PitchType
@@ -27,11 +35,19 @@ type PitchStore = {
   selectedId: string | null
   durationPerFrame: number
   playing: boolean
+  strokes: PitchStroke[]
+  drawTool: DrawTool
+  strokeColor: StrokeColor
   initFromScene: (scene?: DiagramScene | null) => void
   setSelectedId: (id: string | null) => void
   setPlaying: (playing: boolean) => void
   setFrameIndex: (index: number) => void
   setDurationPerFrame: (n: number) => void
+  setDrawTool: (tool: DrawTool) => void
+  setStrokeColor: (color: StrokeColor) => void
+  addStroke: (stroke: PitchStroke) => void
+  eraseAt: (x: number, y: number) => void
+  clearStrokes: () => void
   addElement: (type: PitchElementType, team?: PitchTeam) => void
   removeSelected: () => void
   moveSelected: (x: number, z: number) => void
@@ -39,7 +55,6 @@ type PitchStore = {
   duplicateFrame: () => void
   deleteFrame: () => void
   toScene: () => DiagramScene
-  /** Positions for current frame (for live render). */
   currentPositions: () => KeyframePositions
 }
 
@@ -56,6 +71,9 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
   selectedId: null,
   durationPerFrame: 2.5,
   playing: false,
+  strokes: [],
+  drawTool: 'none',
+  strokeColor: '#F2D98A',
 
   initFromScene: (scene) => {
     const s = cloneScene(scene)
@@ -64,13 +82,11 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
     if (frames.length === 0) {
       frames = [{ id: 'f0', positions: positionsFromElements(s.elements) }]
     } else {
-      // Ensure frame0 includes all element ids
       const base = positionsFromElements(s.elements)
-      frames = frames.map((f, i) =>
-        i === 0
-          ? { ...f, positions: { ...base, ...f.positions } }
-          : { ...f, positions: { ...base, ...f.positions } }
-      )
+      frames = frames.map((f) => ({
+        ...f,
+        positions: { ...base, ...f.positions },
+      }))
     }
     set({
       pitchType: s.pitch.type,
@@ -80,6 +96,8 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
       selectedId: null,
       durationPerFrame: norm.durationPerFrame || 2.5,
       playing: false,
+      strokes: s.strokes ? structuredClone(s.strokes) : [],
+      drawTool: 'none',
     })
   },
 
@@ -92,6 +110,28 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
   },
   setDurationPerFrame: (n) =>
     set({ durationPerFrame: Math.min(12, Math.max(0.3, n)) }),
+
+  setDrawTool: (tool) =>
+    set({
+      drawTool: tool,
+      selectedId: tool === 'none' ? get().selectedId : null,
+    }),
+  setStrokeColor: (color) => set({ strokeColor: color }),
+
+  addStroke: (stroke) => {
+    const { strokes } = get()
+    if (strokes.length >= MAX_PITCH_STROKES) return
+    set({ strokes: [...strokes, stroke] })
+  },
+
+  eraseAt: (x, y) => {
+    const { strokes } = get()
+    set({
+      strokes: strokes.filter((s) => !strokeHitsPoint(s, x, y)),
+    })
+  },
+
+  clearStrokes: () => set({ strokes: [] }),
 
   addElement: (type, team = 'home') => {
     const { elements, frames } = get()
@@ -119,6 +159,7 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
       elements: nextElements,
       frames: nextFrames,
       selectedId: el.id,
+      drawTool: 'none',
     })
   },
 
@@ -136,8 +177,8 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
   },
 
   moveSelected: (x, z) => {
-    const { selectedId, frameIndex, frames, elements } = get()
-    if (!selectedId) return
+    const { selectedId, frameIndex, frames, elements, drawTool } = get()
+    if (!selectedId || drawTool !== 'none') return
     const framesEnsured = ensureFrames(elements, frames)
     const nextFrames = framesEnsured.map((f, i) => {
       if (i !== frameIndex) return f
@@ -146,7 +187,6 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
         positions: mergeElementPosition(f.positions, selectedId, { x, z }),
       }
     })
-    // Frame 0 also updates base element pose
     let nextElements = elements
     if (frameIndex === 0) {
       nextElements = applyPositionsToElements(elements, nextFrames[0].positions)
@@ -190,9 +230,8 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
   },
 
   toScene: () => {
-    const { pitchType, elements, frames, durationPerFrame } = get()
+    const { pitchType, elements, frames, durationPerFrame, strokes } = get()
     const ensured = ensureFrames(elements, frames)
-    // Sync elements from frame 0
     const synced = applyPositionsToElements(elements, ensured[0].positions)
     const animation = buildKeyframeAnimation(ensured, durationPerFrame)
     const scene: DiagramScene = {
@@ -200,6 +239,7 @@ export const usePitchStore = create<PitchStore>((set, get) => ({
       pitch: { type: pitchType, dimensions: [105, 68] },
       elements: synced,
       animation,
+      strokes: strokes.length > 0 ? strokes : undefined,
     }
     return scene
   },

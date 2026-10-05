@@ -11,6 +11,7 @@ import {
 } from '../../lib/pitch'
 import { Button } from '../ui/button'
 import { PitchCanvasShell, PitchSceneInner } from './PitchSceneCore'
+import { DrawingOverlay } from './DrawingOverlay'
 
 export function PitchPlayer({ scene }: { scene: DiagramScene }) {
   const norm = useMemo(() => normalizeAnimation(scene), [scene])
@@ -144,10 +145,16 @@ export function PitchPlayer({ scene }: { scene: DiagramScene }) {
           />
         </div>
       ) : null}
-      <div className="h-[42vh] min-h-[220px] w-full">
+      <div className="relative h-[42vh] min-h-[220px] w-full">
         <PitchCanvasShell className="h-full w-full">
           <PitchSceneInner scene={scene} livePositions={live} />
         </PitchCanvasShell>
+        <DrawingOverlay
+          strokes={scene.strokes ?? []}
+          tool="none"
+          color="#F2D98A"
+          interactive={false}
+        />
       </div>
     </div>
   )

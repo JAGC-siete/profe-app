@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { DiagramScene } from './types'
-import { MAX_PITCH_ELEMENTS, MAX_PITCH_FRAMES } from './types'
+import { MAX_PITCH_ELEMENTS, MAX_PITCH_FRAMES, MAX_PITCH_STROKES } from './types'
 import { isKeyframeAnimation, isLegacyAnimation } from './animation'
 
 const positionSchema = z.object({
@@ -57,6 +57,20 @@ export const pitchAnimationSchema = z.union([
   legacyAnimationSchema,
 ])
 
+const strokePointSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+})
+
+const strokeSchema = z.object({
+  id: z.string().min(1).max(40),
+  kind: z.enum(['arrow', 'pen']),
+  color: z.enum(['#F2D98A', '#46E3FF', '#E63946', '#FFFFFF']),
+  width: z.number().min(0.001).max(0.05),
+  points: z.array(strokePointSchema).min(1).max(400),
+  curvature: z.enum(['flat', 'convex', 'concave']).optional(),
+})
+
 export const diagramSceneSchema = z.object({
   version: z.literal(1),
   pitch: z.object({
@@ -68,6 +82,7 @@ export const diagramSceneSchema = z.object({
   }),
   elements: z.array(elementSchema).max(MAX_PITCH_ELEMENTS),
   animation: pitchAnimationSchema.optional(),
+  strokes: z.array(strokeSchema).max(MAX_PITCH_STROKES).optional(),
 })
 
 /** Escena válida o placeholder vacío en formulario/DB. */
@@ -91,7 +106,9 @@ export function sceneForDb(val: unknown): DiagramScene | Record<string, never> {
 }
 
 export function hasSceneContent(scene: DiagramScene | null | undefined): boolean {
-  return Boolean(scene && scene.elements.length > 0)
+  return Boolean(
+    scene && (scene.elements.length > 0 || (scene.strokes?.length ?? 0) > 0)
+  )
 }
 
 export function hasAnimation(scene: DiagramScene | null | undefined): boolean {

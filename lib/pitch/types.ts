@@ -61,6 +61,33 @@ export interface PitchLegacyAnimation {
 
 export type PitchAnimation = PitchKeyframeAnimation | PitchLegacyAnimation
 
+/** Overlay 2D tools. `none` = drag tokens. */
+export type DrawTool = 'none' | 'arrow' | 'eraser'
+
+export type ArrowCurvature = 'flat' | 'convex' | 'concave'
+
+export type StrokeColor = '#F2D98A' | '#46E3FF' | '#E63946' | '#FFFFFF'
+
+export const STROKE_PALETTE: StrokeColor[] = [
+  '#F2D98A',
+  '#46E3FF',
+  '#E63946',
+  '#FFFFFF',
+]
+
+export const ARROW_CURVATURES: ArrowCurvature[] = ['convex', 'flat', 'concave']
+
+/** Trazo overlay. Puntos normalizados [0..1] sobre el canvas. */
+export interface PitchStroke {
+  id: string
+  kind: 'arrow' | 'pen'
+  color: StrokeColor
+  width: number
+  /** arrow: start+end; pen: polyline */
+  points: Array<{ x: number; y: number }>
+  curvature?: ArrowCurvature
+}
+
 export interface DiagramScene {
   version: 1
   pitch: {
@@ -69,6 +96,7 @@ export interface DiagramScene {
   }
   elements: PitchElement[]
   animation?: PitchAnimation
+  strokes?: PitchStroke[]
 }
 
 /** Runtime-normalized animation used by player/editor. */
@@ -79,3 +107,4 @@ export interface NormalizedAnimation {
 
 export const MAX_PITCH_FRAMES = 24
 export const MAX_PITCH_ELEMENTS = 80
+export const MAX_PITCH_STROKES = 80
