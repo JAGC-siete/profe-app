@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Head from 'next/head'
 import { useRouter } from 'next/router'
 import { useForm, useFieldArray } from 'react-hook-form'
@@ -8,7 +8,11 @@ import {
   trainingSessionSchema,
   type TrainingSessionInput,
 } from '../../../lib/validations/training-session'
-import { aggregateMaterials, parseMaterialsText } from '../../../lib/materials'
+import {
+  aggregateMaterials,
+  normalizeMultilineText,
+  parseMaterialsText,
+} from '../../../lib/materials'
 import { getTodayInHonduras } from '../../../lib/timezone'
 import { cn } from '../../../lib/utils'
 import { Button } from '../../../components/ui/button'
@@ -18,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui
 import {
   BookmarkPlus,
   Camera,
+  Check,
   ChevronDown,
   ChevronUp,
   GripVertical,
@@ -45,6 +50,8 @@ interface DrillOption {
   category?: string | null
 }
 
+const SESSION_PREFS_KEY = 'profe.sessionFormPrefs'
+
 function emptyPhase(phase_name: string, sort_order: number) {
   return {
     phase_name,
@@ -64,8 +71,35 @@ type DrillModalMode =
   | { kind: 'append' }
   | { kind: 'fill'; index: number }
 
+function readSessionPrefs(): { coach_name?: string; category?: string } {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(SESSION_PREFS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as { coach_name?: string; category?: string }
+    return {
+      coach_name: typeof parsed.coach_name === 'string' ? parsed.coach_name : undefined,
+      category: typeof parsed.category === 'string' ? parsed.category : undefined,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function writeSessionPrefs(coach_name: string, category: string) {
+  try {
+    localStorage.setItem(
+      SESSION_PREFS_KEY,
+      JSON.stringify({ coach_name, category })
+    )
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
 export default function NuevaSesionPage() {
   const router = useRouter()
+  const formTopRef = useRef<HTMLDivElement>(null)
   const [submitError, setSubmitError] = useState('')
   const [uploadingIndex, setUploadingIndex] = useState<number | null>(null)
   const [drills, setDrills] = useState<DrillOption[]>([])
@@ -77,6 +111,7 @@ export default function NuevaSesionPage() {
   const [drillModal, setDrillModal] = useState<DrillModalMode | null>(null)
   const [drillQuery, setDrillQuery] = useState('')
   const [pitchEditorIndex, setPitchEditorIndex] = useState<number | null>(null)
+  const [prefsReady, setPrefsReady] = useState(false)
 
   useEffect(() => {
     fetch('/api/drills')
@@ -99,12 +134,58 @@ export default function NuevaSesionPage() {
     },
   })
 
+  useEffect(() => {
+    const prefs = readSessionPrefs()
+    if (prefs.coach_name) form.setValue('coach_name', prefs.coach_name)
+    if (prefs.category) form.setValue('category', prefs.category)
+    setPrefsReady(true)
+  }, [form])
+
+  useEffect(() => {
+    if (!drillMsg) return
+    const t = window.setTimeout(() => setDrillMsg(''), 4000)
+    return () => window.clearTimeout(t)
+  }, [drillMsg])
+
+  useEffect(() => {
+    if (!drillModal) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDrillModal(null)
+        setDrillQuery('')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [drillModal])
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!form.formState.isDirty) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [form.formState.isDirty])
+
   const { fields, append, remove, move } = useFieldArray({
     control: form.control,
     name: 'phases',
   })
 
   const watchedPhases = form.watch('phases')
+  const watchedMeta = form.watch([
+    'coach_name',
+    'category',
+    'scheduled_date',
+    'general_objective',
+  ])
   const totalMinutes = useMemo(
     () =>
       (watchedPhases ?? []).reduce(
@@ -126,6 +207,27 @@ export default function NuevaSesionPage() {
       ),
     [watchedPhases]
   )
+
+  const requiredProgress = useMemo(() => {
+    const [coach, category, date, objective] = watchedMeta
+    const metaDone = [
+      (coach ?? '').trim().length >= 2,
+      (category ?? '').trim().length >= 1,
+      /^\d{4}-\d{2}-\d{2}$/.test(date ?? ''),
+      (objective ?? '').trim().length >= 1,
+    ].filter(Boolean).length
+    const phasesDone = (watchedPhases ?? []).filter(
+      (p) => (p?.phase_name ?? '').trim() && (p?.explanation ?? '').trim()
+    ).length
+    const phasesTotal = Math.max(fields.length, 1)
+    return {
+      metaDone,
+      metaTotal: 4,
+      phasesDone,
+      phasesTotal,
+      ready: metaDone === 4 && phasesDone === phasesTotal,
+    }
+  }, [watchedMeta, watchedPhases, fields.length])
 
   const filteredDrills = useMemo(() => {
     const q = drillQuery.trim().toLowerCase()
@@ -160,12 +262,32 @@ export default function NuevaSesionPage() {
     append(emptyPhase(name, fields.length))
   }
 
+  const removePhase = (index: number) => {
+    if (fields.length <= 1) return
+    const phase = form.getValues(`phases.${index}`)
+    const hasContent = Boolean(
+      phase?.explanation?.trim() ||
+        phase?.variants_materials?.trim() ||
+        phase?.diagram_image_url ||
+        hasSceneContent(parseDiagramScene(phase?.diagram_scene_json))
+    )
+    if (
+      hasContent &&
+      !window.confirm(`¿Eliminar la fase «${phase.phase_name || index + 1}»?`)
+    ) {
+      return
+    }
+    remove(index)
+  }
+
   const applyDrill = (drill: DrillOption, mode: DrillModalMode) => {
+    const variants = normalizeMultilineText(drill.variants_materials ?? '')
+    const explanation = normalizeMultilineText(drill.explanation ?? '')
     if (mode.kind === 'append') {
       append({
         phase_name: drill.name,
-        explanation: drill.explanation,
-        variants_materials: drill.variants_materials ?? '',
+        explanation,
+        variants_materials: variants,
         materials_json: drill.materials_json ?? [],
         diagram_image_url: drill.diagram_image_url || '',
         diagram_scene_json: drill.diagram_scene_json ?? {},
@@ -175,12 +297,8 @@ export default function NuevaSesionPage() {
     } else {
       const i = mode.index
       form.setValue(`phases.${i}.phase_name`, drill.name, { shouldDirty: true })
-      form.setValue(`phases.${i}.explanation`, drill.explanation, { shouldDirty: true })
-      form.setValue(
-        `phases.${i}.variants_materials`,
-        drill.variants_materials ?? '',
-        { shouldDirty: true }
-      )
+      form.setValue(`phases.${i}.explanation`, explanation, { shouldDirty: true })
+      form.setValue(`phases.${i}.variants_materials`, variants, { shouldDirty: true })
       form.setValue(
         `phases.${i}.materials_json`,
         drill.materials_json ?? [],
@@ -203,6 +321,43 @@ export default function NuevaSesionPage() {
     setDrillMsg(`Drill «${drill.name}» aplicado`)
   }
 
+  const focusFirstError = async () => {
+    const ok = await form.trigger()
+    if (ok) return
+    // RHF actualiza errors tras await trigger(); releer desde formState
+    const { errors } = form.formState
+    const metaKeys = [
+      'coach_name',
+      'category',
+      'scheduled_date',
+      'general_objective',
+    ] as const
+    for (const key of metaKeys) {
+      if (errors[key]) {
+        form.setFocus(key)
+        formTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+    }
+    const phaseErrors = errors.phases
+    if (Array.isArray(phaseErrors)) {
+      const idx = phaseErrors.findIndex((p) => p && Object.keys(p).length > 0)
+      if (idx >= 0) {
+        const fieldId = fields[idx]?.id
+        if (fieldId) setPhaseCollapsed(fieldId, false)
+        const focusName = phaseErrors[idx]?.phase_name
+          ? `phases.${idx}.phase_name`
+          : `phases.${idx}.explanation`
+        window.setTimeout(() => {
+          form.setFocus(focusName as `phases.${number}.phase_name`)
+          document
+            .getElementById(`phase-card-${idx}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 50)
+      }
+    }
+  }
+
   const save = async (asTemplate: boolean) => {
     setSubmitError('')
     const values = form.getValues()
@@ -222,7 +377,7 @@ export default function NuevaSesionPage() {
       })),
     })
     if (!parsed.success) {
-      await form.trigger()
+      await focusFirstError()
       setSubmitError('Revisa los campos marcados')
       return
     }
@@ -234,6 +389,8 @@ export default function NuevaSesionPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'No se pudo guardar')
+      writeSessionPrefs(parsed.data.coach_name, parsed.data.category)
+      form.reset(parsed.data)
       await router.push(`/app/entrenamientos/${data.id}`)
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Error al guardar')
@@ -329,25 +486,42 @@ export default function NuevaSesionPage() {
     move(from, toIndex)
   }
 
+  const cancel = () => {
+    if (
+      form.formState.isDirty &&
+      !window.confirm('Hay cambios sin guardar. ¿Salir de todas formas?')
+    ) {
+      return
+    }
+    void router.back()
+  }
+
   return (
     <>
       <Head>
         <title>Nueva sesión · Profe</title>
       </Head>
 
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div
+        ref={formTopRef}
+        className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"
+      >
         <div>
-          <h1 className="font-display text-3xl font-bold">Nueva hoja</h1>
-          <p className="mt-1 text-white/60">
-            Fases flexibles · minutos · materiales · menos scroll
+          <h1 className="font-display text-3xl font-bold">Nueva sesión</h1>
+          <p className="mt-1 text-sm text-white/60">
+            {prefsReady && requiredProgress.ready
+              ? 'Lista para guardar'
+              : `${requiredProgress.metaDone}/${requiredProgress.metaTotal} datos · ${requiredProgress.phasesDone}/${requiredProgress.phasesTotal} fases listas`}
           </p>
         </div>
-        <div className="sticky top-2 z-20 rounded-xl border border-brand-500/30 bg-pitch-900/95 px-4 py-2 text-sm backdrop-blur">
-          <span className="text-white/60">Total </span>
-          <span className="font-display text-lg font-bold text-brand-300">
-            {totalMinutes} min
+        <div className="hidden items-center gap-3 text-sm sm:flex">
+          <span className="rounded-lg border border-brand-500/30 bg-pitch-900/80 px-3 py-1.5">
+            <span className="text-white/50">Total </span>
+            <span className="font-display text-lg font-bold text-brand-300">
+              {totalMinutes} min
+            </span>
           </span>
-          <span className="ml-3 text-white/40">
+          <span className="text-white/40">
             {fields.length} fase{fields.length === 1 ? '' : 's'}
           </span>
         </div>
@@ -358,68 +532,83 @@ export default function NuevaSesionPage() {
           e.preventDefault()
           void save(false)
         }}
-        className="space-y-8 pb-24"
+        className="space-y-6 pb-36"
       >
         <Card variant="glass">
-          <CardHeader>
+          <CardHeader className="pb-2">
             <CardTitle className="text-lg">Datos generales</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <Field label="Entrenador" error={form.formState.errors.coach_name?.message}>
-              <Input {...form.register('coach_name')} placeholder="Gustavo Villela" />
+              <Input
+                {...form.register('coach_name')}
+                placeholder="Nombre del entrenador"
+                autoComplete="name"
+              />
             </Field>
             <Field label="Categoría" error={form.formState.errors.category?.message}>
-              <Input {...form.register('category')} placeholder="Hope U7" />
+              <Input
+                {...form.register('category')}
+                placeholder="Hope U7"
+                autoComplete="off"
+              />
             </Field>
             <Field label="Fecha" error={form.formState.errors.scheduled_date?.message}>
               <Input type="date" {...form.register('scheduled_date')} />
             </Field>
             <Field label="Tema devocional">
-              <Input {...form.register('devotional_theme')} />
+              <Input {...form.register('devotional_theme')} placeholder="Opcional" />
             </Field>
             <div className="sm:col-span-2">
               <Field
                 label="Objetivo general"
                 error={form.formState.errors.general_objective?.message}
               >
-                <Textarea rows={2} {...form.register('general_objective')} />
+                <Textarea
+                  rows={2}
+                  {...form.register('general_objective')}
+                  placeholder="¿Qué deben lograr hoy?"
+                />
               </Field>
             </div>
             <div className="sm:col-span-2">
               <Field label="Objetivo físico">
-                <Textarea rows={2} {...form.register('physical_objective')} />
+                <Textarea
+                  rows={2}
+                  {...form.register('physical_objective')}
+                  placeholder="Opcional"
+                />
               </Field>
             </div>
           </CardContent>
         </Card>
 
-        <Card variant="glass">
-          <CardHeader>
-            <CardTitle className="text-base">Materiales de sesión</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {materials.length === 0 ? (
-              <p className="text-sm text-white/50">
-                Se agregan solos al escribir materiales por fase (ej. &quot;12 conos&quot;).
-              </p>
-            ) : (
-              <ul className="flex flex-wrap gap-2">
-                {materials.map((m) => (
-                  <li
-                    key={m.item}
-                    className="rounded-md bg-brand-600/20 px-2.5 py-1 text-sm text-brand-100"
-                  >
-                    {m.qty} {m.item}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+        {materials.length > 0 ? (
+          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-white/45">
+              Materiales de sesión
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {materials.map((m) => (
+                <li
+                  key={m.item}
+                  className="rounded-md bg-brand-600/20 px-2.5 py-1 text-sm text-brand-100"
+                >
+                  {m.qty} {m.item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-display text-xl font-semibold">Fases</h2>
+            <div>
+              <h2 className="font-display text-xl font-semibold">Fases</h2>
+              <p className="text-xs text-white/45">
+                Escribe materiales por fase (ej. 12 conos) — se suman solos
+              </p>
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -431,7 +620,7 @@ export default function NuevaSesionPage() {
                   setCollapsed(next)
                 }}
               >
-                Colapsar todas
+                Colapsar
               </Button>
               <Button
                 type="button"
@@ -443,7 +632,7 @@ export default function NuevaSesionPage() {
                   setCollapsed(next)
                 }}
               >
-                Expandir todas
+                Expandir
               </Button>
               <Button
                 type="button"
@@ -489,10 +678,14 @@ export default function NuevaSesionPage() {
             const mins = Number(watchedPhases?.[index]?.duration_minutes) || 0
             const preview = (watchedPhases?.[index]?.explanation || '').trim()
             const collapsedNow = isCollapsed(field.id, index)
+            const phaseReady = Boolean(
+              (watchedPhases?.[index]?.phase_name || '').trim() && preview
+            )
 
             return (
               <Card
                 key={field.id}
+                id={`phase-card-${index}`}
                 variant="glass"
                 draggable={false}
                 onDragOver={onDragOver(index)}
@@ -502,10 +695,30 @@ export default function NuevaSesionPage() {
                   dragOver === index && dragFrom !== index && 'ring-2 ring-brand-400/60'
                 )}
               >
-                <CardHeader className="flex flex-row items-center gap-2 space-y-0 pb-2">
+                <CardHeader className="flex flex-row items-center gap-1 space-y-0 pb-2 sm:gap-2">
+                  <div className="flex shrink-0 flex-col sm:hidden">
+                    <button
+                      type="button"
+                      className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white disabled:opacity-30"
+                      aria-label="Subir fase"
+                      disabled={index === 0}
+                      onClick={() => move(index, index - 1)}
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white disabled:opacity-30"
+                      aria-label="Bajar fase"
+                      disabled={index >= fields.length - 1}
+                      onClick={() => move(index, index + 1)}
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    className="cursor-grab touch-none rounded p-1 text-white/40 hover:bg-white/10 hover:text-white active:cursor-grabbing"
+                    className="hidden cursor-grab touch-none rounded p-1 text-white/40 hover:bg-white/10 hover:text-white active:cursor-grabbing sm:block"
                     title="Arrastrar para reordenar"
                     aria-label="Arrastrar fase"
                     draggable
@@ -520,29 +733,39 @@ export default function NuevaSesionPage() {
 
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left sm:gap-3"
                     onClick={() => {
                       if (collapsedNow) expandOnly(field.id)
                       else setPhaseCollapsed(field.id, true)
                     }}
                   >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-brand-600/25 text-xs font-bold text-brand-200">
-                      {index + 1}
+                    <span
+                      className={cn(
+                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-bold',
+                        phaseReady
+                          ? 'bg-brand-500/30 text-brand-100'
+                          : 'bg-white/10 text-white/50'
+                      )}
+                      aria-label={phaseReady ? 'Fase completa' : 'Fase incompleta'}
+                    >
+                      {phaseReady ? <Check className="h-3.5 w-3.5" /> : index + 1}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-display text-base font-semibold text-brand-200">
+                      <span className="block font-display text-base font-semibold leading-tight text-brand-200 [overflow-wrap:anywhere]">
                         {phaseName}
                       </span>
                       {collapsedNow ? (
-                        <span className="block truncate text-xs text-white/45">
+                        <span className="mt-0.5 block line-clamp-2 text-xs text-white/45">
                           {mins} min
-                          {preview ? ` · ${preview}` : ' · sin explicación'}
+                          {preview ? ` · ${preview}` : ' · falta explicación'}
                         </span>
                       ) : null}
                     </span>
-                    <span className="shrink-0 rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
-                      {mins} min
-                    </span>
+                    {!collapsedNow ? (
+                      <span className="shrink-0 rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
+                        {mins} min
+                      </span>
+                    ) : null}
                     {collapsedNow ? (
                       <ChevronDown className="h-4 w-4 shrink-0 text-white/50" />
                     ) : (
@@ -556,6 +779,7 @@ export default function NuevaSesionPage() {
                       size="icon"
                       variant="ghost"
                       title="Guardar fase como drill"
+                      aria-label="Guardar fase como drill"
                       disabled={savingDrillIndex === index}
                       onClick={() => void savePhaseAsDrill(index)}
                     >
@@ -567,7 +791,8 @@ export default function NuevaSesionPage() {
                       variant="ghost"
                       disabled={fields.length <= 1}
                       title="Eliminar fase"
-                      onClick={() => remove(index)}
+                      aria-label="Eliminar fase"
+                      onClick={() => removePhase(index)}
                     >
                       <Trash2 className="h-4 w-4 text-red-300" />
                     </Button>
@@ -591,6 +816,7 @@ export default function NuevaSesionPage() {
                             type="number"
                             min={0}
                             max={180}
+                            inputMode="numeric"
                             {...form.register(`phases.${index}.duration_minutes`, {
                               valueAsNumber: true,
                             })}
@@ -607,7 +833,7 @@ export default function NuevaSesionPage() {
                         }}
                       >
                         <Library className="mr-1 h-4 w-4" />
-                        Importar Drill
+                        Importar drill
                       </Button>
                     </div>
 
@@ -625,14 +851,14 @@ export default function NuevaSesionPage() {
                       <Textarea
                         rows={2}
                         {...form.register(`phases.${index}.variants_materials`)}
-                        placeholder="12 conos&#10;3 balones"
+                        placeholder={'12 conos\n3 balones'}
                       />
                     </Field>
                     <div>
                       <label className="mb-1.5 block text-sm text-white/70">
                         Diseño de ejercicio
                       </label>
-                      <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Button
                           type="button"
                           size="sm"
@@ -641,7 +867,7 @@ export default function NuevaSesionPage() {
                         >
                           Editor 3D
                         </Button>
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm hover:bg-white/10">
+                        <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 text-xs hover:bg-brand-800 hover:border-brand-600">
                           <Camera className="h-4 w-4" />
                           {uploadingIndex === index ? 'Subiendo…' : 'Cámara'}
                           <input
@@ -657,7 +883,7 @@ export default function NuevaSesionPage() {
                             }}
                           />
                         </label>
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm hover:bg-white/10">
+                        <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 text-xs hover:bg-brand-800 hover:border-brand-600">
                           <ImagePlus className="h-4 w-4" />
                           Galería
                           <input
@@ -708,16 +934,24 @@ export default function NuevaSesionPage() {
         </div>
 
         {drillMsg && (
-          <p className="rounded-lg bg-brand-500/15 px-4 py-3 text-brand-100">{drillMsg}</p>
+          <p
+            role="status"
+            className="rounded-lg bg-brand-500/15 px-4 py-3 text-brand-100"
+          >
+            {drillMsg}
+          </p>
         )}
         {submitError && (
-          <p className="rounded-lg bg-red-500/20 px-4 py-3 text-red-100">{submitError}</p>
+          <p
+            role="alert"
+            className="rounded-lg bg-red-500/20 px-4 py-3 text-red-100"
+          >
+            {submitError}
+          </p>
         )}
 
-        <div className="flex flex-wrap gap-3">
-          <Button type="submit" disabled={form.formState.isSubmitting}>
-            {form.formState.isSubmitting ? 'Guardando…' : 'Guardar sesión'}
-          </Button>
+        {/* Desktop secondary actions; primary save lives in sticky bar */}
+        <div className="hidden flex-wrap gap-3 sm:flex">
           <Button
             type="button"
             variant="secondary"
@@ -726,11 +960,47 @@ export default function NuevaSesionPage() {
           >
             Guardar como plantilla
           </Button>
-          <Button type="button" variant="outline" onClick={() => router.back()}>
+          <Button type="button" variant="outline" onClick={cancel}>
             Cancelar
           </Button>
         </div>
       </form>
+
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-pitch-950/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="min-w-0 flex-1">
+            <p className="font-display text-lg font-bold text-brand-300">
+              {totalMinutes}{' '}
+              <span className="text-sm font-medium text-white/50">min</span>
+            </p>
+            <p className="truncate text-xs text-white/45">
+              {fields.length} fase{fields.length === 1 ? '' : 's'}
+              {materials.length > 0
+                ? ` · ${materials.length} material${materials.length === 1 ? '' : 'es'}`
+                : ''}
+              {!requiredProgress.ready ? ' · faltan datos' : ''}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="hidden shrink-0 sm:inline-flex"
+            disabled={form.formState.isSubmitting}
+            onClick={() => void save(true)}
+          >
+            Plantilla
+          </Button>
+          <Button
+            type="button"
+            className="shrink-0 min-w-[8.5rem]"
+            disabled={form.formState.isSubmitting}
+            onClick={() => void save(false)}
+          >
+            {form.formState.isSubmitting ? 'Guardando…' : 'Guardar sesión'}
+          </Button>
+        </div>
+      </div>
 
       {pitchEditorIndex != null ? (
         <DynamicPitchEditor
@@ -757,7 +1027,10 @@ export default function NuevaSesionPage() {
           role="dialog"
           aria-modal="true"
           aria-label="Importar drill"
-          onClick={() => setDrillModal(null)}
+          onClick={() => {
+            setDrillModal(null)
+            setDrillQuery('')
+          }}
         >
           <div
             className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl border border-white/15 bg-pitch-900 shadow-2xl"
@@ -765,7 +1038,7 @@ export default function NuevaSesionPage() {
           >
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div>
-                <p className="font-display text-lg font-semibold">Importar Drill</p>
+                <p className="font-display text-lg font-semibold">Importar drill</p>
                 <p className="text-xs text-white/50">
                   {drillModal.kind === 'append'
                     ? 'Añade una fase nueva con el ejercicio'
@@ -776,7 +1049,11 @@ export default function NuevaSesionPage() {
                 type="button"
                 size="icon"
                 variant="ghost"
-                onClick={() => setDrillModal(null)}
+                aria-label="Cerrar"
+                onClick={() => {
+                  setDrillModal(null)
+                  setDrillQuery('')
+                }}
               >
                 <X className="h-4 w-4" />
               </Button>

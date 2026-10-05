@@ -1,10 +1,15 @@
 export type MaterialItem = { item: string; qty: number }
 
+/** Normaliza literales `\\n` / `\\r\\n` que a veces llegan desde JSON/drills. */
+export function normalizeMultilineText(text: string): string {
+  return text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n')
+}
+
 /** Parsea líneas tipo "* 12 tortugas" o "3 balones" → materiales. */
 export function parseMaterialsText(text: string): MaterialItem[] {
   if (!text?.trim()) return []
   const out: MaterialItem[] = []
-  for (const raw of text.split(/\n|;|,/)) {
+  for (const raw of normalizeMultilineText(text).split(/\n|;|,/)) {
     const line = raw.replace(/^[\s*•\-]+/, '').trim()
     if (!line) continue
     const m = line.match(/^(\d+)\s+(.+)$/)

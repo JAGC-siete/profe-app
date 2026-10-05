@@ -69,8 +69,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <Library className="h-4 w-4" />
               <span className="hidden sm:inline">Drills</span>
             </Link>
-            <Link href="/app/entrenamientos/nuevo">
-              <Button size="sm" className="gap-1.5">
+            <Link href="/app/entrenamientos/nuevo" aria-current={router.pathname === '/app/entrenamientos/nuevo' ? 'page' : undefined}>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                variant={router.pathname === '/app/entrenamientos/nuevo' ? 'secondary' : 'default'}
+              >
                 <Plus className="h-4 w-4" />
                 Nueva
               </Button>
