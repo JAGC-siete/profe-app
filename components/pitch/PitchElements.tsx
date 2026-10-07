@@ -1,10 +1,19 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useRef, type MutableRefObject } from 'react'
 import { Html } from '@react-three/drei'
-import type { ThreeEvent } from '@react-three/fiber'
-import type { DiagramScene, PitchElement, PitchTeam } from '../../lib/pitch'
+import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { CanvasTexture, type Group, type Mesh, type MeshBasicMaterial } from 'three'
+import type {
+  DiagramScene,
+  LivePose,
+  PitchElement,
+  PitchTeam,
+} from '../../lib/pitch'
 import { normToWorld } from '../../lib/pitch'
+
+/** Pose escrita fuera de React (PlaybackDriver); null = usar props. */
+export type LivePositionsRef = MutableRefObject<LivePose | null>
 
 /** Escala visual: tokens ~reales se ven como puntos en cancha completa. */
 const TOKEN_SCALE = 3.2
@@ -24,22 +33,132 @@ function elementColor(el: PitchElement): string {
   return TEAM_COLOR[el.team ?? 'home']
 }
 
+/** Sombra difusa compartida (gradiente radial). */
+let shadowTexture: CanvasTexture | null = null
+function getShadowTexture(): CanvasTexture {
+  if (shadowTexture) return shadowTexture
+  const size = 64
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+    g.addColorStop(0, 'rgba(0,0,0,1)')
+    g.addColorStop(0.55, 'rgba(0,0,0,0.55)')
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, size, size)
+  }
+  shadowTexture = new CanvasTexture(canvas)
+  return shadowTexture
+}
+
+/** Radio de sombra (unidades locales del token); sin sombra = no se dibuja. */
+const SHADOW_RADIUS: Partial<Record<PitchElement['type'], number>> = {
+  player: 0.6,
+  cone: 0.5,
+  ball: 0.4,
+}
+const SHADOW_OPACITY = 0.4
+/** Luz cenital ligeramente oblicua: la sombra se corre al alejarse del suelo. */
+const SHADOW_OFFSET = { x: 0.12, z: 0.18 }
+const SHADOW_SHIFT_PER_M = 0.3
+
+/** m/s a partir de los cuales el indicador de dirección se ve entero. */
+const FULL_SPEED_MS = 5
+const TURN_RATE = 10
+const SPEED_SMOOTHING = 8
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+
+function dampAngle(current: number, target: number, rate: number, dt: number) {
+  const diff = Math.atan2(Math.sin(target - current), Math.cos(target - current))
+  return current + diff * (1 - Math.exp(-rate * dt))
+}
+
 function ElementMesh({
   el,
   pitchType,
   selected,
   onSelect,
   onPointerDownElement,
+  livePositionsRef,
 }: {
   el: PitchElement
   pitchType: DiagramScene['pitch']['type']
   selected?: boolean
   onSelect?: (id: string) => void
   onPointerDownElement?: (id: string, e: ThreeEvent<PointerEvent>) => void
+  livePositionsRef?: LivePositionsRef
 }) {
   const [x, , z] = normToWorld(el.position.x, el.position.z, pitchType)
   const rotY = ((el.position.rotation ?? 0) * Math.PI) / 180
   const color = elementColor(el)
+  const shadowRadius = SHADOW_RADIUS[el.type]
+  const isPlayer = el.type === 'player'
+
+  const groupRef = useRef<Group>(null)
+  const bodyRef = useRef<Group>(null)
+  const shadowRef = useRef<Mesh>(null)
+  const headingMatRef = useRef<MeshBasicMaterial>(null)
+  const motion = useRef({ wx: x, wz: z, speed: 0, heading: rotY, stride: 0 })
+  const reducedMotion = useMemo(prefersReducedMotion, [])
+
+  // Siempre reaplica (ref o props): tras una reproducción el grupo no queda
+  // con una pose mutada que React no sabe que cambió.
+  useFrame((_, rawDelta) => {
+    const group = groupRef.current
+    const body = bodyRef.current
+    if (!group || !body || !livePositionsRef) return
+    const dt = Math.min(rawDelta, 0.1)
+    const live = livePositionsRef.current?.[el.id]
+    const p = live ?? el.position
+    const [wx, , wz] = normToWorld(p.x, p.z, pitchType)
+    const lift = live?.y ?? 0
+    const m = motion.current
+
+    // Velocidad solo durante la reproducción (arrastrar no cuenta como correr).
+    const dx = wx - m.wx
+    const dz = wz - m.wz
+    const step = Math.hypot(dx, dz)
+    const rawSpeed = live && dt > 0 ? step / dt : 0
+    m.speed += (rawSpeed - m.speed) * (1 - Math.exp(-SPEED_SMOOTHING * dt))
+    m.wx = wx
+    m.wz = wz
+
+    group.position.set(wx, lift, wz)
+
+    const restHeading = (((p.rotation ?? el.position.rotation) ?? 0) * Math.PI) / 180
+    if (isPlayer && live) {
+      // Mirar hacia donde corre; quieto conserva el último rumbo.
+      if (step > 1e-4) m.heading = dampAngle(m.heading, Math.atan2(dx, dz), TURN_RATE, dt)
+    } else if (!isPlayer || m.speed < 0.1) {
+      // Esperar a que se apague el indicador antes de volver al rumbo guardado.
+      m.heading = restHeading
+    }
+    body.rotation.y = m.heading
+
+    const run = Math.min(1, m.speed / FULL_SPEED_MS)
+    if (isPlayer) {
+      m.stride += step
+      body.position.y = reducedMotion ? 0 : Math.abs(Math.sin(m.stride * 0.9)) * 0.08 * run
+      if (headingMatRef.current) headingMatRef.current.opacity = 0.85 * run
+    }
+
+    const shadow = shadowRef.current
+    if (shadow) {
+      // La sombra queda en el césped aunque el balón suba; se aleja y se difumina.
+      const local = lift / TOKEN_SCALE
+      const shift = lift * SHADOW_SHIFT_PER_M / TOKEN_SCALE
+      shadow.position.set(SHADOW_OFFSET.x + shift, 0.02 - local, SHADOW_OFFSET.z + shift)
+      const k = 1 / (1 + lift * 0.25)
+      shadow.scale.setScalar(k)
+      ;(shadow.material as MeshBasicMaterial).opacity = SHADOW_OPACITY * k
+    }
+  })
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation()
@@ -54,8 +173,8 @@ function ElementMesh({
 
   return (
     <group
+      ref={groupRef}
       position={[x, 0, z]}
-      rotation={[0, rotY, 0]}
       scale={TOKEN_SCALE}
       onClick={handleClick}
       onPointerDown={handlePointerDown}
@@ -67,79 +186,114 @@ function ElementMesh({
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {el.type === 'cone' ? (
-        <mesh position={[0, 0.35, 0]}>
-          <coneGeometry args={[0.45, 0.7, 10]} />
-          <meshStandardMaterial
-            color={color}
-            emissive={selected ? '#fff' : '#000'}
-            emissiveIntensity={selected ? 0.35 : 0}
+      {shadowRadius ? (
+        <mesh
+          ref={shadowRef}
+          position={[SHADOW_OFFSET.x, 0.02, SHADOW_OFFSET.z]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          raycast={() => null}
+        >
+          <planeGeometry args={[shadowRadius * 2, shadowRadius * 2]} />
+          <meshBasicMaterial
+            map={getShadowTexture()}
+            transparent
+            opacity={SHADOW_OPACITY}
+            depthWrite={false}
           />
         </mesh>
       ) : null}
 
-      {el.type === 'ball' ? (
-        <mesh position={[0, 0.35, 0]}>
-          <sphereGeometry args={[0.32, 16, 16]} />
-          <meshStandardMaterial
-            color={color}
-            emissive={selected ? '#fff' : '#000'}
-            emissiveIntensity={selected ? 0.25 : 0}
-          />
-        </mesh>
-      ) : null}
-
-      {el.type === 'goal' ? (
-        <>
-          <mesh position={[-1.8, 1, 0]}>
-            <boxGeometry args={[0.12, 2, 0.12]} />
-            <meshStandardMaterial color={color} />
-          </mesh>
-          <mesh position={[1.8, 1, 0]}>
-            <boxGeometry args={[0.12, 2, 0.12]} />
-            <meshStandardMaterial color={color} />
-          </mesh>
-          <mesh position={[0, 2, 0]}>
-            <boxGeometry args={[3.72, 0.12, 0.12]} />
-            <meshStandardMaterial color={color} />
-          </mesh>
-        </>
-      ) : null}
-
-      {el.type === 'marker' ? (
-        <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[0.55, 20]} />
-          <meshBasicMaterial color={color} transparent opacity={selected ? 1 : 0.85} />
-        </mesh>
-      ) : null}
-
-      {el.type === 'player' ? (
-        <>
-          <mesh position={[0, 0.55, 0]}>
-            <capsuleGeometry args={[0.4, 0.6, 6, 12]} />
+      <group ref={bodyRef} rotation={[0, rotY, 0]}>
+        {el.type === 'cone' ? (
+          <mesh position={[0, 0.35, 0]}>
+            <coneGeometry args={[0.45, 0.7, 10]} />
             <meshStandardMaterial
               color={color}
               emissive={selected ? '#fff' : '#000'}
-              emissiveIntensity={selected ? 0.3 : 0}
+              emissiveIntensity={selected ? 0.35 : 0}
             />
           </mesh>
-          {el.number != null ? (
-            <Html
-              position={[0, 1.55, 0]}
-              center
-              distanceFactor={28}
-              style={{ pointerEvents: 'none' }}
+        ) : null}
+
+        {el.type === 'ball' ? (
+          <mesh position={[0, 0.35, 0]}>
+            <sphereGeometry args={[0.32, 16, 16]} />
+            <meshStandardMaterial
+              color={color}
+              emissive={selected ? '#fff' : '#000'}
+              emissiveIntensity={selected ? 0.25 : 0}
+            />
+          </mesh>
+        ) : null}
+
+        {el.type === 'goal' ? (
+          <>
+            <mesh position={[-1.8, 1, 0]}>
+              <boxGeometry args={[0.12, 2, 0.12]} />
+              <meshStandardMaterial color={color} />
+            </mesh>
+            <mesh position={[1.8, 1, 0]}>
+              <boxGeometry args={[0.12, 2, 0.12]} />
+              <meshStandardMaterial color={color} />
+            </mesh>
+            <mesh position={[0, 2, 0]}>
+              <boxGeometry args={[3.72, 0.12, 0.12]} />
+              <meshStandardMaterial color={color} />
+            </mesh>
+          </>
+        ) : null}
+
+        {el.type === 'marker' ? (
+          <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[0.55, 20]} />
+            <meshBasicMaterial color={color} transparent opacity={selected ? 1 : 0.85} />
+          </mesh>
+        ) : null}
+
+        {isPlayer ? (
+          <>
+            <mesh position={[0, 0.55, 0]}>
+              <capsuleGeometry args={[0.4, 0.6, 6, 12]} />
+              <meshStandardMaterial
+                color={color}
+                emissive={selected ? '#fff' : '#000'}
+                emissiveIntensity={selected ? 0.3 : 0}
+              />
+            </mesh>
+            {/* Indicador de rumbo (+z local); aparece al correr. */}
+            <mesh
+              position={[0, 0.05, 0.78]}
+              rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+              raycast={() => null}
             >
-              <span
-                className={`flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-bold shadow ${
-                  selected ? 'bg-white text-[#07140c]' : 'bg-black/70 text-white'
-                }`}
-              >
-                {el.number}
-              </span>
-            </Html>
-          ) : null}
-        </>
+              <circleGeometry args={[0.28, 3]} />
+              <meshBasicMaterial
+                ref={headingMatRef}
+                color="#ffffff"
+                transparent
+                opacity={0}
+                depthWrite={false}
+              />
+            </mesh>
+          </>
+        ) : null}
+      </group>
+
+      {isPlayer && el.number != null ? (
+        <Html
+          position={[0, 1.55, 0]}
+          center
+          distanceFactor={28}
+          style={{ pointerEvents: 'none' }}
+        >
+          <span
+            className={`flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-bold shadow ${
+              selected ? 'bg-white text-[#07140c]' : 'bg-black/70 text-white'
+            }`}
+          >
+            {el.number}
+          </span>
+        </Html>
       ) : null}
 
       {selected ? (
@@ -158,12 +312,14 @@ export function PitchElements({
   onSelect,
   onPointerDownElement,
   livePositions,
+  livePositionsRef,
 }: {
   scene: DiagramScene
   selectedId?: string | null
   onSelect?: (id: string) => void
   onPointerDownElement?: (id: string, e: ThreeEvent<PointerEvent>) => void
   livePositions?: Record<string, { x: number; z: number; rotation?: number }>
+  livePositionsRef?: LivePositionsRef
 }) {
   const elements = useMemo(() => {
     if (!livePositions) return scene.elements
@@ -191,6 +347,7 @@ export function PitchElements({
           selected={selectedId === el.id}
           onSelect={onSelect}
           onPointerDownElement={onPointerDownElement}
+          livePositionsRef={livePositionsRef}
         />
       ))}
     </>

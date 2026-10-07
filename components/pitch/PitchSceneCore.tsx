@@ -7,7 +7,7 @@ import type { Camera, Scene, WebGLRenderer } from 'three'
 import type { DiagramScene } from '../../lib/pitch'
 import { pitchAspect } from '../../lib/pitch'
 import { FieldPlane } from './FieldPlane'
-import { PitchElements } from './PitchElements'
+import { PitchElements, type LivePositionsRef } from './PitchElements'
 
 export type GlApi = { gl: WebGLRenderer; scene: Scene; camera: Camera }
 
@@ -32,6 +32,7 @@ export function PitchSceneInner({
   onSelect,
   onPointerDownElement,
   livePositions,
+  livePositionsRef,
   enableOrbit = false,
   orbitEnabled = true,
   children,
@@ -41,6 +42,8 @@ export function PitchSceneInner({
   onSelect?: (id: string) => void
   onPointerDownElement?: (id: string, e: ThreeEvent<PointerEvent>) => void
   livePositions?: Record<string, { x: number; z: number; rotation?: number }>
+  /** Pose por frame sin re-render (reproducción). */
+  livePositionsRef?: LivePositionsRef
   enableOrbit?: boolean
   /** Disable pan/zoom while dragging tokens. */
   orbitEnabled?: boolean
@@ -59,6 +62,7 @@ export function PitchSceneInner({
         onSelect={onSelect}
         onPointerDownElement={onPointerDownElement}
         livePositions={livePositions}
+        livePositionsRef={livePositionsRef}
       />
       {enableOrbit ? (
         <OrbitControls
