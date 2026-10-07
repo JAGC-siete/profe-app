@@ -11,6 +11,7 @@ import type {
   PitchTeam,
 } from '../../lib/pitch'
 import { normToWorld } from '../../lib/pitch'
+import { EXPORT_HIDDEN } from './exportTopDown'
 
 /** Pose escrita fuera de React (PlaybackDriver); null = usar props. */
 export type LivePositionsRef = MutableRefObject<LivePose | null>
@@ -68,11 +69,9 @@ const SHADOW_SHIFT_PER_M = 0.3
 /** m/s a partir de los cuales el indicador de dirección se ve entero. */
 const FULL_SPEED_MS = 5
 const TURN_RATE = 10
+/** Más que esto en un solo cuadro = salto de pose (reset/replay), no carrera. */
+const TELEPORT_M = 5
 const SPEED_SMOOTHING = 8
-
-const prefersReducedMotion = () =>
-  typeof window !== 'undefined' &&
-  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 
 function dampAngle(current: number, target: number, rate: number, dt: number) {
   const diff = Math.atan2(Math.sin(target - current), Math.cos(target - current))
@@ -104,8 +103,7 @@ function ElementMesh({
   const bodyRef = useRef<Group>(null)
   const shadowRef = useRef<Mesh>(null)
   const headingMatRef = useRef<MeshBasicMaterial>(null)
-  const motion = useRef({ wx: x, wz: z, speed: 0, heading: rotY, stride: 0 })
-  const reducedMotion = useMemo(prefersReducedMotion, [])
+  const motion = useRef({ wx: x, wz: z, speed: 0, heading: rotY })
 
   // Siempre reaplica (ref o props): tras una reproducción el grupo no queda
   // con una pose mutada que React no sabe que cambió.
@@ -123,7 +121,8 @@ function ElementMesh({
     // Velocidad solo durante la reproducción (arrastrar no cuenta como correr).
     const dx = wx - m.wx
     const dz = wz - m.wz
-    const step = Math.hypot(dx, dz)
+    const jump = Math.hypot(dx, dz)
+    const step = jump > TELEPORT_M ? 0 : jump
     const rawSpeed = live && dt > 0 ? step / dt : 0
     m.speed += (rawSpeed - m.speed) * (1 - Math.exp(-SPEED_SMOOTHING * dt))
     m.wx = wx
@@ -141,11 +140,8 @@ function ElementMesh({
     }
     body.rotation.y = m.heading
 
-    const run = Math.min(1, m.speed / FULL_SPEED_MS)
-    if (isPlayer) {
-      m.stride += step
-      body.position.y = reducedMotion ? 0 : Math.abs(Math.sin(m.stride * 0.9)) * 0.08 * run
-      if (headingMatRef.current) headingMatRef.current.opacity = 0.85 * run
+    if (headingMatRef.current) {
+      headingMatRef.current.opacity = 0.85 * Math.min(1, m.speed / FULL_SPEED_MS)
     }
 
     const shadow = shadowRef.current
@@ -192,6 +188,7 @@ function ElementMesh({
           position={[SHADOW_OFFSET.x, 0.02, SHADOW_OFFSET.z]}
           rotation={[-Math.PI / 2, 0, 0]}
           raycast={() => null}
+          userData={{ [EXPORT_HIDDEN]: true }}
         >
           <planeGeometry args={[shadowRadius * 2, shadowRadius * 2]} />
           <meshBasicMaterial

@@ -67,8 +67,9 @@ export function PitchPlayer({ scene }: { scene: DiagramScene }) {
 
   const togglePlay = () => {
     if (playing) {
+      // Se conserva livePositionsRef: la pose pausada (balón en el aire incluido)
+      // sigue en pantalla y Play reanuda desde ahí.
       setPlaying(false)
-      freeze(livePositionsRef.current)
       return
     }
     if (frameIndex >= norm.frames.length - 1) reset()

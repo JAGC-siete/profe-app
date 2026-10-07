@@ -144,25 +144,70 @@ export type EasingFn = (t: number) => number
 
 export const linearEase: EasingFn = (t) => t
 
-/** Arranque y frenado suaves: los tokens aceleran y desaceleran entre frames. */
-export const easeInOutCubic: EasingFn = (t) => {
+/**
+ * Hermite cúbica en [0,1] con pendientes v0/v1 en los extremos (1 = lineal).
+ * (0,0) = arranque y frenado suaves; (1,1) = lineal.
+ */
+export function hermiteEase(t: number, v0: number, v1: number): number {
   const tt = Math.min(1, Math.max(0, t))
-  return tt < 0.5 ? 4 * tt * tt * tt : 1 - Math.pow(-2 * tt + 2, 3) / 2
+  const t2 = tt * tt
+  const t3 = t2 * tt
+  return (t3 - 2 * t2 + tt) * v0 + (3 * t2 - 2 * t3) + (t3 - t2) * v1
 }
 
-/** Pose en tiempo global: frameIndex + localT entre frameIndex y frameIndex+1. */
+const MOVE_EPS = 1e-3
+
+function moves(a: PitchPosition | undefined, b: PitchPosition | undefined) {
+  return Boolean(
+    a && b && (Math.abs(a.x - b.x) > MOVE_EPS || Math.abs(a.z - b.z) > MOVE_EPS)
+  )
+}
+
+/**
+ * t suavizado de un elemento en el tramo frameIndex → frameIndex+1.
+ * Solo frena si después se queda quieto y solo acelera si venía quieto:
+ * un jugador que sigue corriendo no se detiene en cada keyframe.
+ */
+export function elementSegmentT(
+  norm: NormalizedAnimation,
+  frameIndex: number,
+  id: string,
+  localT: number
+): number {
+  const f = norm.frames
+  const startsFromRest = !moves(f[frameIndex - 1]?.positions[id], f[frameIndex]?.positions[id])
+  const endsAtRest = !moves(f[frameIndex + 1]?.positions[id], f[frameIndex + 2]?.positions[id])
+  return hermiteEase(localT, startsFromRest ? 0 : 1, endsAtRest ? 0 : 1)
+}
+
+/**
+ * Pose en tiempo global: frameIndex + localT entre frameIndex y frameIndex+1.
+ * Sin `ease`, cada elemento usa elementSegmentT; con `ease`, t uniforme.
+ */
 export function sampleNormalizedAnimation(
   norm: NormalizedAnimation,
   frameIndex: number,
   localT: number,
-  ease: EasingFn = easeInOutCubic
+  ease?: EasingFn
 ): KeyframePositions {
   if (norm.frames.length === 0) return {}
   const i = Math.min(Math.max(0, frameIndex), norm.frames.length - 1)
   const from = norm.frames[i]?.positions ?? {}
   if (i >= norm.frames.length - 1) return clonePositions(from)
   const to = norm.frames[i + 1]?.positions ?? from
-  return interpolateFrames(from, to, ease(localT))
+  if (ease) return interpolateFrames(from, to, ease(localT))
+
+  const out: KeyframePositions = {}
+  for (const id of new Set([...Object.keys(from), ...Object.keys(to)])) {
+    const t = elementSegmentT(norm, i, id, localT)
+    Object.assign(out, interpolateFrames(pick(from, id), pick(to, id), t))
+  }
+  return out
+}
+
+function pick(pos: KeyframePositions, id: string): KeyframePositions {
+  const p = pos[id]
+  return p ? { [id]: p } : {}
 }
 
 /** Pose en vivo: como KeyframePositions + altura opcional (m) sobre el césped. */
@@ -179,7 +224,7 @@ export function passPeakHeight(distanceM: number): number {
   return Math.min(LOFT_MAX_M, (distanceM - LOFT_MIN_DISTANCE_M) * LOFT_PER_M)
 }
 
-/** Parábola del pase en t ∈ [0,1] (mismo t ya suavizado que x/z). */
+/** Parábola del pase en t ∈ [0,1] (mismo t suavizado que x/z). */
 export function passArcHeight(distanceM: number, t: number): number {
   const tt = Math.min(1, Math.max(0, t))
   return 4 * passPeakHeight(distanceM) * tt * (1 - tt)
@@ -192,8 +237,7 @@ export function liftBalls(
   frameIndex: number,
   localT: number,
   ballIds: ReadonlySet<string>,
-  pitchType: PitchType,
-  ease: EasingFn = easeInOutCubic
+  pitchType: PitchType
 ): LivePose {
   const from = norm.frames[frameIndex]?.positions
   const to = norm.frames[frameIndex + 1]?.positions
@@ -206,7 +250,8 @@ export function liftBalls(
     if (!a || !b || !p) continue
     const [ax, , az] = normToWorld(a.x, a.z, pitchType)
     const [bx, , bz] = normToWorld(b.x, b.z, pitchType)
-    out[id] = { ...p, y: passArcHeight(Math.hypot(bx - ax, bz - az), ease(localT)) }
+    const t = elementSegmentT(norm, frameIndex, id, localT)
+    out[id] = { ...p, y: passArcHeight(Math.hypot(bx - ax, bz - az), t) }
   }
   return out
 }

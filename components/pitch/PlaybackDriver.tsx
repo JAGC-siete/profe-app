@@ -1,6 +1,6 @@
 'use client'
 
-import type { MutableRefObject } from 'react'
+import { useLayoutEffect, useRef, type MutableRefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import {
   advancePlayback,
@@ -43,9 +43,16 @@ export function PlaybackDriver({
   onFrameChange?: (frame: number) => void
   onEnd: (finalPositions: KeyframePositions) => void
 }) {
+  // El loop puede correr un cuadro más antes de que React aplique playing=false:
+  // sin este flag onEnd se dispararía dos veces.
+  const finished = useRef(false)
+  useLayoutEffect(() => {
+    if (playing) finished.current = false
+  }, [playing])
+
   // Prioridad negativa: corre antes que los useFrame de los tokens (sin lag de 1 frame).
   useFrame((_, delta) => {
-    if (!playing || frames.length < 2) return
+    if (!playing || finished.current || frames.length < 2) return
     const prevFrame = cursorRef.current.frame
     const next = advancePlayback(
       cursorRef.current,
@@ -60,6 +67,7 @@ export function PlaybackDriver({
       ? liftBalls(pose, norm, next.frame, next.t, ballIds, pitchType)
       : pose
     if (next.done) {
+      finished.current = true
       onEnd(pose)
       return
     }

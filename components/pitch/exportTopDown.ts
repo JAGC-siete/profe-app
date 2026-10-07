@@ -1,5 +1,9 @@
 import { paintStrokes, type PitchStroke } from '../../lib/pitch'
+import type { Object3D } from 'three'
 import type { GlApi } from './PitchSceneCore'
+
+/** userData flag: objetos solo de pantalla (sombras, etc.) fuera del PNG. */
+export const EXPORT_HIDDEN = 'exportHidden'
 
 /** Captura PNG/WebP desde el canvas WebGL (vista actual). */
 export function capturePitchDataUrl(
@@ -8,8 +12,19 @@ export function capturePitchDataUrl(
   quality = 0.86
 ): string {
   const { gl, scene, camera } = api
-  gl.render(scene, camera)
-  return gl.domElement.toDataURL(mime, quality)
+  const hidden: Object3D[] = []
+  scene.traverse((obj) => {
+    if (obj.userData[EXPORT_HIDDEN] && obj.visible) {
+      obj.visible = false
+      hidden.push(obj)
+    }
+  })
+  try {
+    gl.render(scene, camera)
+    return gl.domElement.toDataURL(mime, quality)
+  } finally {
+    for (const obj of hidden) obj.visible = true
+  }
 }
 
 /** Compone WebGL + strokes 2D para el preview exportado. */

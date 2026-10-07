@@ -4,7 +4,8 @@
  */
 import {
   advancePlayback,
-  easeInOutCubic,
+  elementSegmentT,
+  hermiteEase,
   hasNormalizedAnimation,
   interpolateFrames,
   legacyStepsToFrames,
@@ -95,20 +96,44 @@ const baseScene: DiagramScene = {
 
 // easing
 {
-  assert(easeInOutCubic(0) === 0 && easeInOutCubic(1) === 1, 'ease endpoints')
-  assert(easeInOutCubic(0.5) === 0.5, 'ease symmetric midpoint')
-  assert(easeInOutCubic(0.1) < 0.1, 'ease slow start')
-  assert(easeInOutCubic(0.9) > 0.9, 'ease slow end')
-  const norm = {
+  assert(hermiteEase(0, 0, 0) === 0 && hermiteEase(1, 0, 0) === 1, 'ease endpoints')
+  assert(hermiteEase(0.5, 0, 0) === 0.5, 'ease symmetric midpoint')
+  assert(hermiteEase(0.1, 0, 0) < 0.1 && hermiteEase(0.9, 0, 0) > 0.9, 'ease in-out')
+  assert(Math.abs(hermiteEase(0.3, 1, 1) - 0.3) < 1e-12, 'v=1 is linear')
+  for (const [v0, v1] of [[0, 1], [1, 0]]) {
+    let prev = 0
+    for (let k = 1; k <= 20; k++) {
+      const y = hermiteEase(k / 20, v0, v1)
+      assert(y >= prev - 1e-12, `monotonic ${v0}${v1}`)
+      prev = y
+    }
+  }
+
+  const two = {
     durationPerFrame: 2,
     frames: [
       { id: 'f0', positions: { p1: { x: 0, z: 0 } } },
       { id: 'f1', positions: { p1: { x: 100, z: 100 } } },
     ],
   }
-  assert(sampleNormalizedAnimation(norm, 0, 0.25).p1.x < 25, 'eased sample')
-  assert(sampleNormalizedAnimation(norm, 0, 0.25, linearEase).p1.x === 25, 'linear sample')
-  assert(sampleNormalizedAnimation(norm, 0, 1).p1.x === 100, 'sample end')
+  assert(sampleNormalizedAnimation(two, 0, 0.25).p1.x < 25, 'eased from/to rest')
+  assert(sampleNormalizedAnimation(two, 0, 0.25, linearEase).p1.x === 25, 'linear sample')
+  assert(sampleNormalizedAnimation(two, 0, 1).p1.x === 100, 'sample end')
+
+  // Carrera continua 0 → 50 → 100: no se detiene en el keyframe intermedio.
+  const run = {
+    durationPerFrame: 2,
+    frames: [
+      { id: 'f0', positions: { p1: { x: 0, z: 0 }, c: { x: 5, z: 5 } } },
+      { id: 'f1', positions: { p1: { x: 50, z: 0 }, c: { x: 5, z: 5 } } },
+      { id: 'f2', positions: { p1: { x: 100, z: 0 }, c: { x: 5, z: 5 } } },
+    ],
+  }
+  assert(elementSegmentT(run, 0, 'p1', 0.1) < 0.1, 'accelerates from rest')
+  assert(elementSegmentT(run, 1, 'p1', 0.9) > 0.9, 'brakes into rest')
+  assert(sampleNormalizedAnimation(run, 1, 0.1).p1.x > 53, 'keeps speed through keyframe')
+  assert(sampleNormalizedAnimation(run, 0, 0.9).p1.x > 43, 'arrives at keyframe moving')
+  assert(sampleNormalizedAnimation(run, 1, 0.5).c.x === 5, 'static element stays')
 }
 
 // playback cursor
