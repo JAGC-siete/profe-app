@@ -5,9 +5,11 @@ import type { ThreeEvent } from '@react-three/fiber'
 import {
   applyPositionsToElements,
   pitchDimensions,
-  sampleNormalizedAnimation,
   STROKE_PALETTE,
   type DiagramScene,
+  type KeyframePositions,
+  type LivePose,
+  type PlaybackCursor,
 } from '../../lib/pitch'
 import { usePitchStore } from '../../lib/pitch/store'
 import { MAX_PITCH_FRAMES } from '../../lib/pitch/types'
@@ -21,6 +23,7 @@ import {
 import { capturePitchWithStrokes, uploadPitchCapture } from './exportTopDown'
 import { TokenDragBridge } from './TokenDragControls'
 import { DrawingOverlay } from './DrawingOverlay'
+import { PlaybackDriver } from './PlaybackDriver'
 
 export function PitchEditorV2({
   initialScene,
@@ -60,15 +63,13 @@ export function PitchEditorV2({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [orbitEnabled, setOrbitEnabled] = useState(true)
-  const [previewPositions, setPreviewPositions] = useState<
-    Record<string, { x: number; z: number; rotation?: number }> | null
-  >(null)
   const glApi = useRef<GlApi | null>(null)
   const beginDragRef = useRef<
     ((id: string, e: ThreeEvent<PointerEvent>) => void) | null
   >(null)
-  const raf = useRef<number | null>(null)
-  const playCursor = useRef({ frame: 0, t: 0 })
+  const playCursor = useRef<PlaybackCursor>({ frame: 0, t: 0 })
+  // Pose de preview escrita por PlaybackDriver (sin re-render por frame).
+  const previewPositionsRef = useRef<LivePose | null>(null)
 
   useEffect(() => {
     initFromScene(initialScene)
@@ -92,75 +93,28 @@ export function PitchEditorV2({
   }, [])
 
   const framePositions = frames[frameIndex]?.positions
+  const ballIds = useMemo(
+    () => new Set(elements.filter((el) => el.type === 'ball').map((el) => el.id)),
+    [elements]
+  )
 
   const sceneForRender: DiagramScene = useMemo(() => {
-    const positions = previewPositions ?? framePositions ?? {}
     return {
       version: 1,
       pitch: { type: pitchType, dimensions: pitchDimensions(pitchType) },
-      elements: applyPositionsToElements(elements, positions),
+      elements: applyPositionsToElements(elements, framePositions ?? {}),
     }
-  }, [pitchType, elements, previewPositions, framePositions])
+  }, [pitchType, elements, framePositions])
 
-  // Playback preview (respect document.hidden)
   useEffect(() => {
-    if (!playing || frames.length < 2) {
-      if (!playing) setPreviewPositions(null)
-      return
-    }
+    if (!playing) previewPositionsRef.current = null
+  }, [playing])
 
-    let cancelled = false
-    playCursor.current = { frame: 0, t: 0 }
-    let last = performance.now()
-    const framesSnap = frames
-    const dur = durationPerFrame
-
-    const tick = (now: number) => {
-      if (cancelled) return
-      if (typeof document !== 'undefined' && document.hidden) {
-        last = now
-        raf.current = requestAnimationFrame(tick)
-        return
-      }
-      const dt = (now - last) / 1000
-      last = now
-      let { frame, t } = playCursor.current
-      t += dt / dur
-      while (t >= 1 && frame < framesSnap.length - 1) {
-        t -= 1
-        frame += 1
-      }
-      if (frame >= framesSnap.length - 1 && t >= 1) {
-        playCursor.current = { frame: framesSnap.length - 1, t: 1 }
-        setPreviewPositions(
-          sampleNormalizedAnimation(
-            { durationPerFrame: dur, frames: framesSnap },
-            framesSnap.length - 2,
-            1
-          )
-        )
-        setPlaying(false)
-        setFrameIndex(framesSnap.length - 1)
-        return
-      }
-      playCursor.current = { frame, t }
-      setPreviewPositions(
-        sampleNormalizedAnimation(
-          { durationPerFrame: dur, frames: framesSnap },
-          frame,
-          t
-        )
-      )
-      raf.current = requestAnimationFrame(tick)
-    }
-
-    raf.current = requestAnimationFrame(tick)
-    return () => {
-      cancelled = true
-      if (raf.current != null) cancelAnimationFrame(raf.current)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- start only when play toggles
-  }, [playing, frames, durationPerFrame, setPlaying, setFrameIndex])
+  const onPlaybackEnd = useCallback(() => {
+    previewPositionsRef.current = null
+    // setFrameIndex también pone playing=false en el store.
+    setFrameIndex(frames.length - 1)
+  }, [frames.length, setFrameIndex])
 
   const handleSave = async () => {
     if (!glApi.current) {
@@ -170,7 +124,7 @@ export function PitchEditorV2({
     setBusy(true)
     setError('')
     setPlaying(false)
-    setPreviewPositions(null)
+    previewPositionsRef.current = null
     setSelectedId(null)
     try {
       await new Promise((r) => requestAnimationFrame(() => r(null)))
@@ -309,9 +263,9 @@ export function PitchEditorV2({
           onClick={() => {
             if (playing) {
               setPlaying(false)
-              setPreviewPositions(null)
             } else {
               setFrameIndex(0)
+              playCursor.current = { frame: 0, t: 0 }
               setPlaying(true)
             }
           }}
@@ -324,7 +278,6 @@ export function PitchEditorV2({
           variant="outline"
           onClick={() => {
             setPlaying(false)
-            setPreviewPositions(null)
             setFrameIndex(0)
           }}
         >
@@ -363,10 +316,7 @@ export function PitchEditorV2({
               key={f.id}
               type="button"
               disabled={playing}
-              onClick={() => {
-                setPreviewPositions(null)
-                setFrameIndex(i)
-              }}
+              onClick={() => setFrameIndex(i)}
               className={`rounded px-2 py-1 text-xs ${
                 i === frameIndex
                   ? 'bg-brand-500 text-white'
@@ -385,10 +335,7 @@ export function PitchEditorV2({
             step={1}
             value={frameIndex}
             disabled={playing}
-            onChange={(e) => {
-              setPreviewPositions(null)
-              setFrameIndex(Number(e.target.value))
-            }}
+            onChange={(e) => setFrameIndex(Number(e.target.value))}
             className="ml-2 w-32 accent-brand-400"
             aria-label="Scrubber de frames"
           />
@@ -408,6 +355,7 @@ export function PitchEditorV2({
               if (!playing && drawTool === 'none') setSelectedId(id)
             }}
             onPointerDownElement={onPointerDownElement}
+            livePositionsRef={previewPositionsRef}
             enableOrbit
             orbitEnabled={orbitEnabled && !playing && !drawingMode}
           >
@@ -417,6 +365,16 @@ export function PitchEditorV2({
               onDraggingChange={(d) => setOrbitEnabled(!d)}
             />
             <ExportBridge onReady={onReady} />
+            <PlaybackDriver
+              playing={playing}
+              frames={frames}
+              durationPerFrame={durationPerFrame}
+              cursorRef={playCursor}
+              livePositionsRef={previewPositionsRef}
+              pitchType={pitchType}
+              ballIds={ballIds}
+              onEnd={onPlaybackEnd}
+            />
           </PitchSceneInner>
         </PitchCanvasShell>
         <DrawingOverlay

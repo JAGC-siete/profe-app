@@ -1,98 +1,79 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   hasNormalizedAnimation,
   normalizeAnimation,
   positionsFromElements,
-  sampleNormalizedAnimation,
   type DiagramScene,
   type KeyframePositions,
+  type LivePose,
+  type PlaybackCursor,
 } from '../../lib/pitch'
 import { Button } from '../ui/button'
 import { PitchCanvasShell, PitchSceneInner } from './PitchSceneCore'
 import { DrawingOverlay } from './DrawingOverlay'
+import { PlaybackDriver } from './PlaybackDriver'
 
 export function PitchPlayer({ scene }: { scene: DiagramScene }) {
   const norm = useMemo(() => normalizeAnimation(scene), [scene])
   const canPlay = hasNormalizedAnimation(norm)
+  // Pose estática (pausa / scrub). Durante play manda livePositionsRef.
   const [live, setLive] = useState<KeyframePositions>(() =>
     positionsFromElements(scene.elements)
   )
   const [playing, setPlaying] = useState(false)
   const [frameIndex, setFrameIndex] = useState(0)
-  const raf = useRef<number | null>(null)
-  const cursor = useRef({ frame: 0, t: 0 })
+  const cursor = useRef<PlaybackCursor>({ frame: 0, t: 0 })
+  const livePositionsRef = useRef<LivePose | null>(null)
+  const ballIds = useMemo(
+    () => new Set(scene.elements.filter((el) => el.type === 'ball').map((el) => el.id)),
+    [scene.elements]
+  )
 
   useEffect(() => {
     setLive(positionsFromElements(scene.elements))
     setFrameIndex(0)
     setPlaying(false)
+    cursor.current = { frame: 0, t: 0 }
+    livePositionsRef.current = null
   }, [scene])
 
-  useEffect(() => {
-    if (!playing || !canPlay) return
+  /** Vuelca la pose del loop a React y suelta el ref. */
+  const freeze = useCallback((pose: KeyframePositions | null) => {
+    if (pose) setLive(pose)
+    livePositionsRef.current = null
+  }, [])
 
-    let cancelled = false
-    // Start from current scrub position once; do not re-bind on frameIndex updates.
-    cursor.current = { frame: frameIndex, t: 0 }
-    let last = performance.now()
-    const duration = norm.durationPerFrame
-    const frames = norm.frames
-
-    const tick = (now: number) => {
-      if (cancelled) return
-      if (typeof document !== 'undefined' && document.hidden) {
-        last = now
-        raf.current = requestAnimationFrame(tick)
-        return
-      }
-      const dt = (now - last) / 1000
-      last = now
-      let { frame, t } = cursor.current
-      t += dt / duration
-      while (t >= 1 && frame < frames.length - 1) {
-        t -= 1
-        frame += 1
-      }
-      if (frame >= frames.length - 1 && t >= 1) {
-        setLive(
-          sampleNormalizedAnimation(
-            { durationPerFrame: duration, frames },
-            frames.length - 2,
-            1
-          )
-        )
-        setFrameIndex(frames.length - 1)
-        setPlaying(false)
-        return
-      }
-      cursor.current = { frame, t }
-      setLive(
-        sampleNormalizedAnimation(
-          { durationPerFrame: duration, frames },
-          frame,
-          t
-        )
-      )
-      setFrameIndex(frame)
-      raf.current = requestAnimationFrame(tick)
-    }
-
-    raf.current = requestAnimationFrame(tick)
-    return () => {
-      cancelled = true
-      if (raf.current != null) cancelAnimationFrame(raf.current)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- start only when play toggles
-  }, [playing, canPlay, norm])
+  const onEnd = useCallback(
+    (pose: KeyframePositions) => {
+      freeze(pose)
+      cursor.current = { frame: norm.frames.length - 1, t: 0 }
+      setFrameIndex(norm.frames.length - 1)
+      setPlaying(false)
+    },
+    [freeze, norm.frames.length]
+  )
 
   const reset = () => {
     setPlaying(false)
+    freeze(null)
+    cursor.current = { frame: 0, t: 0 }
     setLive(
       norm.frames[0]?.positions ?? positionsFromElements(scene.elements)
     )
     setFrameIndex(0)
+  }
+
+  const togglePlay = () => {
+    if (playing) {
+      // Se conserva livePositionsRef: la pose pausada (balón en el aire incluido)
+      // sigue en pantalla y Play reanuda desde ahí.
+      setPlaying(false)
+      return
+    }
+    if (frameIndex >= norm.frames.length - 1) reset()
+    setPlaying(true)
   }
 
   const label = useMemo(() => {
@@ -110,10 +91,7 @@ export function PitchPlayer({ scene }: { scene: DiagramScene }) {
             size="sm"
             variant="secondary"
             disabled={!canPlay}
-            onClick={() => {
-              if (!playing && frameIndex >= norm.frames.length - 1) reset()
-              setPlaying((p) => !p)
-            }}
+            onClick={togglePlay}
           >
             {playing ? 'Pausa' : 'Play'}
           </Button>
@@ -134,6 +112,8 @@ export function PitchPlayer({ scene }: { scene: DiagramScene }) {
             onChange={(e) => {
               const i = Number(e.target.value)
               setPlaying(false)
+              freeze(null)
+              cursor.current = { frame: i, t: 0 }
               setFrameIndex(i)
               setLive(
                 norm.frames[i]?.positions ??
@@ -147,7 +127,23 @@ export function PitchPlayer({ scene }: { scene: DiagramScene }) {
       ) : null}
       <div className="relative h-[42vh] min-h-[220px] w-full">
         <PitchCanvasShell className="h-full w-full">
-          <PitchSceneInner scene={scene} livePositions={live} />
+          <PitchSceneInner
+            scene={scene}
+            livePositions={live}
+            livePositionsRef={livePositionsRef}
+          >
+            <PlaybackDriver
+              playing={playing && canPlay}
+              frames={norm.frames}
+              durationPerFrame={norm.durationPerFrame}
+              cursorRef={cursor}
+              livePositionsRef={livePositionsRef}
+              pitchType={scene.pitch.type}
+              ballIds={ballIds}
+              onFrameChange={setFrameIndex}
+              onEnd={onEnd}
+            />
+          </PitchSceneInner>
         </PitchCanvasShell>
         <DrawingOverlay
           strokes={scene.strokes ?? []}
